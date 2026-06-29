@@ -142,11 +142,25 @@ describe("diagnosis", () => {
       suggestions: ["Check origin trust"],
     });
   });
+  it("failureDiagnosis omits optional explanation and suggestions when absent", () => {
+    expect(failureDiagnosis({ ruleId: "unknown", rootCause: "No matching rule" })).toEqual({
+      status: "failure",
+      ruleId: "unknown",
+      rootCause: "No matching rule",
+    });
+  });
   it("unknownDiagnosis has a default explanation and no rootCause", () => {
     const u = unknownDiagnosis();
     expect(u.status).toBe("unknown");
     expect(u.explanation).toContain("No diagnostic rule matched");
     expect(u).not.toHaveProperty("rootCause");
+  });
+  it("unknownDiagnosis carries explicit explanation and suggestions", () => {
+    expect(unknownDiagnosis({ explanation: "Inspect manually", suggestions: ["Capture live evidence"] })).toEqual({
+      status: "unknown",
+      explanation: "Inspect manually",
+      suggestions: ["Capture live evidence"],
+    });
   });
 });
 
@@ -162,6 +176,7 @@ describe("trace", () => {
   it("chainRef omits absent fields", () => {
     expect(chainRef()).toEqual({});
     expect(chainRef({ name: "Relay" })).toEqual({ name: "Relay" });
+    expect(chainRef({ location: location(1) })).toEqual({ location: { parents: 1, interior: "Here" } });
   });
   it("hop omits fees when absent", () => {
     const h = hop({
@@ -176,6 +191,14 @@ describe("trace", () => {
     const r = traceResult({ hops: [sampleHop], diagnosis: sampleHop.diagnosis });
     expect(r.hops).toHaveLength(1);
     expect(r.diagnosis.status).toBe("success");
+  });
+  it("traceResult carries trace-level fees", () => {
+    const r = traceResult({
+      hops: [sampleHop],
+      diagnosis: sampleHop.diagnosis,
+      fees: feeEstimate({ fee: 3n, asset: assetId({}) }),
+    });
+    expect(r.fees?.fee).toBe(3n);
   });
   it("singleHopTrace lifts the hop's diagnosis and fees", () => {
     const r = singleHopTrace(sampleHop);
@@ -194,5 +217,12 @@ describe("request origins", () => {
       kind: "location",
       location: { parents: 1, interior: "Here" },
     });
+  });
+});
+
+describe("runtime-empty modules", () => {
+  it("loads placeholder/type-only modules without exported runtime state", async () => {
+    await expect(import("../registry/index.js").then(Object.keys)).resolves.toEqual([]);
+    await expect(import("./json.js").then(Object.keys)).resolves.toEqual([]);
   });
 });

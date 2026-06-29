@@ -1,6 +1,15 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { buildProgram } from "./command.js";
-import type { TraceRequest } from "../types/index.js";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+
+const pipeline = vi.hoisted(() => ({
+  trace: vi.fn(),
+  render: vi.fn(),
+}));
+
+vi.mock("../orchestrator/index.js", () => ({ trace: pipeline.trace }));
+vi.mock("../report/index.js", () => ({ render: pipeline.render }));
+
+import { buildProgram, runCli } from "./command.js";
+import type { TraceRequest, TraceResult } from "../types/index.js";
 
 /** Parse user-level args (no node/script prefix) through a program with an injected runner. */
 async function run(
@@ -9,6 +18,24 @@ async function run(
 ): Promise<void> {
   await buildProgram(runner).parseAsync(Array.from(args), { from: "user" });
 }
+
+async function runTraceAction(
+  raw: Readonly<Record<string, unknown>>,
+  runner: (req: TraceRequest) => Promise<string> = () => Promise.resolve(""),
+): Promise<void> {
+  const command = buildProgram(runner).commands[0] as unknown as {
+    readonly _actionHandler: (args: readonly unknown[]) => Promise<void>;
+    readonly setOptionValue: (key: string, value: unknown) => void;
+  };
+  for (const [key, value] of Object.entries(raw)) {
+    command.setOptionValue(key, value);
+  }
+  await command._actionHandler([]);
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -47,6 +74,27 @@ describe("cartographer trace — request building", () => {
     await run(["trace", "--rpc", "wss://x.test", "--origin", "//Alice", "--call", "0x01"], runner);
 
     expect(captured?.format).toBe("human");
+  });
+});
+
+describe("cartographer trace — CLI runner", () => {
+  it("parses process-style argv through the default trace/render pipeline", async () => {
+    const result: TraceResult = { hops: [], diagnosis: { status: "success" } };
+    pipeline.trace.mockResolvedValue(result);
+    pipeline.render.mockReturnValue("PIPELINE");
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+
+    await runCli(["node", "cartographer", "trace", "--rpc", "wss://x.test", "--origin", "//Alice", "--call", "0x0100"]);
+
+    expect(pipeline.trace).toHaveBeenCalledWith({
+      rpc: "wss://x.test",
+      origin: { kind: "account", account: "//Alice" },
+      resultXcmVersion: 4,
+      format: "human",
+      call: "0x0100",
+    });
+    expect(pipeline.render).toHaveBeenCalledWith(result, "human");
+    expect(out).toHaveBeenCalledWith("PIPELINE\n");
   });
 });
 
@@ -93,5 +141,23 @@ describe("cartographer trace — validation", () => {
     await expect(
       run(["trace", "--rpc", "wss://x", "--origin", "//Alice", "--call", "0x01", "--format", "yaml"], noop),
     ).rejects.toThrow(/Unknown --format/);
+  });
+
+  it("rejects malformed commander option bags defensively", async () => {
+    await expect(runTraceAction({ origin: "//Alice", call: "0x01" })).rejects.toThrow(/--rpc/);
+  });
+
+  it("defaults a non-string internal format value to human", async () => {
+    let captured: TraceRequest | undefined;
+
+    await runTraceAction(
+      { rpc: "wss://x.test", origin: "//Alice", call: "0x01", format: 4 },
+      (request) => {
+        captured = request;
+        return Promise.resolve("");
+      },
+    );
+
+    expect(captured?.format).toBe("human");
   });
 });

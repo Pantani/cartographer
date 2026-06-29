@@ -45,6 +45,11 @@ describe("toNormalized", () => {
       c: { d: false },
     });
   });
+
+  it("stringifies non-JSON primitive inputs defensively", () => {
+    expect(toNormalized(Symbol("xcm"))).toBe("Symbol(xcm)");
+    expect(toNormalized(() => "x")).toBe("[unrepresentable]");
+  });
 });
 
 describe("normalizeExecutionResult", () => {
@@ -88,6 +93,11 @@ describe("normalizeEvent", () => {
   it("wraps a non-struct inner payload under `value`", () => {
     const entry: PapiEventEntry = { type: "System", value: { type: "ExtrinsicSuccess", value: 7n } };
     expect(normalizeEvent(entry)).toEqual({ pallet: "System", name: "ExtrinsicSuccess", data: { value: 7n } });
+  });
+
+  it("wraps a missing inner payload as null", () => {
+    const entry: PapiEventEntry = { type: "System", value: { type: "ExtrinsicSuccess" } };
+    expect(normalizeEvent(entry)).toEqual({ pallet: "System", name: "ExtrinsicSuccess", data: { value: null } });
   });
 });
 
@@ -174,5 +184,34 @@ describe("normalizeFees", () => {
 
   it("maps a bare fee with an empty asset when no asset/weight is provided", () => {
     expect(normalizeFees({ fee: 5n })).toEqual({ fee: 5n, asset: {} });
+  });
+
+  it("extracts a nested versioned asset location", () => {
+    const payload: PapiFeePayload = {
+      fee: 9n,
+      asset: {
+        type: "V4",
+        value: { value: { parents: 1, interior: { X1: { Parachain: 1000n } } } },
+      },
+    };
+
+    expect(normalizeFees(payload)).toEqual({
+      fee: 9n,
+      asset: { location: { parents: 1, interior: { X1: { Parachain: 1000n } } } },
+    });
+  });
+
+  it("falls back to an empty asset for unrecognized versioned asset shapes", () => {
+    expect(normalizeFees({ fee: 3n, asset: { type: "V2", value: { concrete: "unknown" } } })).toEqual({
+      fee: 3n,
+      asset: {},
+    });
+  });
+
+  it("falls back to an empty asset when the versioned asset value is not a record", () => {
+    expect(normalizeFees({ fee: 4n, asset: { type: "V2", value: "DOT" } })).toEqual({
+      fee: 4n,
+      asset: {},
+    });
   });
 });

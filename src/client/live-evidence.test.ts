@@ -61,6 +61,51 @@ describe("makeDryRunEvidence", () => {
     expect(evidence.normalizedEffects).toEqual(effects());
     expect(evidence.fees).toBe(fees);
   });
+
+  it("summarizes an unwrapped dry-run with empty optional collections", () => {
+    const rawDryRun = {
+      execution_result: { success: true },
+      emitted_events: [],
+      forwarded_xcms: [],
+    };
+
+    const evidence = makeDryRunEvidence({
+      label: "unwrapped",
+      account: "5Alice",
+      call: "1234" as HexString,
+      resultXcmVersion: 4,
+      rawDryRun,
+      normalizedEffects: effects(),
+      fees: { kind: "skipped", reason: "no local xcm" },
+    });
+
+    expect(evidence.input.callBytes).toBe(2);
+    expect(evidence.rawShape).toEqual({
+      wrappedResult: false,
+      topLevelKeys: ["execution_result", "emitted_events", "forwarded_xcms"],
+      effectsKeys: ["execution_result", "emitted_events", "forwarded_xcms"],
+      emittedEventsCount: 0,
+      forwardedXcmsCount: 0,
+    });
+  });
+
+  it("keeps a primitive raw payload describable without optional shape fields", () => {
+    const evidence = makeDryRunEvidence({
+      label: "primitive",
+      account: "5Alice",
+      call: CALL,
+      resultXcmVersion: 4,
+      rawDryRun: "not a record",
+      normalizedEffects: effects(),
+      fees: { kind: "failed", error: "payment unavailable" },
+    });
+
+    expect(evidence.rawShape).toEqual({
+      wrappedResult: false,
+      topLevelKeys: [],
+      effectsKeys: [],
+    });
+  });
 });
 
 describe("toEvidenceJson", () => {

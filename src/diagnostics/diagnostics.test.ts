@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { diagnoseWithSeedRules } from "./engine.js";
-import { diagnosisContext } from "../types/index.js";
+import { errorText, isFailure } from "./match.js";
+import { diagnosisContext, executionError } from "../types/index.js";
 import {
   successEffects,
   barrierBlockedEffects,
@@ -26,6 +27,15 @@ describe("success path", () => {
 
   it("does NOT classify a clean dry-run as any failure", () => {
     expect(diag(successEffects).status).not.toBe("failure");
+  });
+
+  it("reports the top-level execution result through the shared matcher", () => {
+    expect(isFailure(diagnosisContext(successEffects))).toBe(false);
+    expect(isFailure(diagnosisContext(barrierBlockedEffects))).toBe(true);
+  });
+
+  it("builds searchable error text when detail is absent", () => {
+    expect(errorText(executionError("Barrier"))).toBe("barrier ");
   });
 });
 

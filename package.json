@@ -8,13 +8,21 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm coverage && pnpm depcheck && pnpm build",
+    "infra:up": "pnpm build && pnpm test:it",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
     "test": "vitest run --exclude '**/*.it.test.ts'",
     "test:debug-flow": "vitest run src/cli/debug-flow.it.test.ts",
     "test:it": "vitest run .it.test",
+    "test:live": "pnpm run live:check:full && vitest run .it.test",
     "coverage": "vitest run --coverage --exclude '**/*.it.test.ts'",
-    "depcheck": "depcruise src --config .dependency-cruiser.cjs"
+    "depcheck": "depcruise src --config .dependency-cruiser.cjs",
+    "live:check:client": "node scripts/cartographer-live.mjs check-client",
+    "live:check:full": "node scripts/cartographer-live.mjs check-full",
+    "xcm:cli": "pnpm build && node scripts/cartographer-live.mjs run-cli",
+    "xcm:test": "pnpm run live:check:client && vitest run src/client/dry-run.it.test.ts"
   },
   "engines": {
     "node": ">=20"

@@ -91,6 +91,24 @@ describe("openChainClient", () => {
     expect(effects.executionResult.kind).toBe("success");
   });
 
+  it("accepts an already-unwrapped dry-run effects payload", async () => {
+    mocks.dryRunCall.mockResolvedValue({ execution_result: ok({ result: "Ok" }), emitted_events: [], forwarded_xcms: [] });
+    const client = openChainClient("wss://example.test");
+
+    const effects = await client.dryRunCall(accountOrigin("5Alice"), CALL, 4);
+
+    expect(effects.executionResult.kind).toBe("success");
+  });
+
+  it("rejects a DryRunApi runtime Err with the decoded payload attached", async () => {
+    mocks.dryRunCall.mockResolvedValue({ success: false, value: { type: "Unsupported", value: 7n } });
+    const client = openChainClient("wss://example.test");
+
+    await expect(client.dryRunCall(accountOrigin("5Alice"), CALL, 4)).rejects.toThrow(
+      'DryRunApi.dry_run_call returned Err: {"type":"Unsupported","value":"7"}',
+    );
+  });
+
   it("rejects a location origin for dryRunCall because it is not an OriginCaller", async () => {
     const client = openChainClient("wss://example.test");
 
@@ -118,5 +136,34 @@ describe("openChainClient", () => {
       asset: { location: { parents: 0, interior: "Here" } },
       weight: { refTime: 100n, proofSize: 2n },
     });
+  });
+
+  it.each([
+    [2, "V2"],
+    [3, "V3"],
+    [5, "V5"],
+  ] as const)("encodes XCM v%s programs before fee estimation", async (version, tag) => {
+    mocks.queryXcmWeight.mockResolvedValue(ok({ ref_time: 100n, proof_size: 2n }));
+    mocks.queryAcceptablePaymentAssets.mockResolvedValue(ok([{ type: "V4", value: { parents: 0, interior: "Here" } }]));
+    mocks.queryWeightToAssetFee.mockResolvedValue(ok(12_345n));
+    const client = openChainClient("wss://example.test");
+
+    await client.estimateFees(xcmProgram(version, [xcmInstruction("WithdrawAsset", [{ id: "DOT" }])]));
+
+    expect(mocks.queryXcmWeight).toHaveBeenCalledWith({
+      type: tag,
+      value: [{ type: "WithdrawAsset", value: [{ id: "DOT" }] }],
+    });
+  });
+
+  it("rejects fee estimation when the runtime returns no acceptable payment assets", async () => {
+    mocks.queryXcmWeight.mockResolvedValue(ok({ ref_time: 100n, proof_size: 2n }));
+    mocks.queryAcceptablePaymentAssets.mockResolvedValue(ok([]));
+    const client = openChainClient("wss://example.test");
+
+    await expect(client.estimateFees(xcmProgram(4, [xcmInstruction("ClearOrigin")]))).rejects.toThrow(
+      /no payment assets/,
+    );
+    expect(mocks.queryWeightToAssetFee).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,23 @@
 import { describe, it, expect } from "vitest";
 import { render, renderHuman, renderJson } from "./index.js";
+import { formatEvents, formatForwardedXcms, formatRawEffects } from "./format.js";
+import {
+  assetId,
+  chainRef,
+  dryRunEffects,
+  executionError,
+  executionFailure,
+  executionSuccess,
+  feeEstimate,
+  forwardedXcm,
+  hop,
+  location,
+  normalizedEvent,
+  singleHopTrace,
+  successDiagnosis,
+  traceResult,
+  xcmProgram,
+} from "../types/index.js";
 import {
   failureTrace,
   forwardedTrace,
@@ -28,6 +46,61 @@ describe("renderHuman", () => {
     expect(rendered).toContain("Forwarded XCM:");
     expect(rendered).toContain("destination {\"parents\":1,\"interior\":{\"X1\":{\"Parachain\":\"2000\"}}}");
     expect(rendered).toContain("message 0: v4 ReserveAssetDeposited, ClearOrigin");
+  });
+
+  it("uses rpc and unknown-chain fallbacks when a hop has no chain name", () => {
+    const effects = dryRunEffects({ executionResult: executionSuccess(), xcmVersion: 4 });
+    const withRpc = singleHopTrace(
+      hop({ index: 0, chain: chainRef({ rpc: "wss://relay.example" }), effects, diagnosis: successDiagnosis() }),
+    );
+    const unknown = singleHopTrace(
+      hop({ index: 1, chain: chainRef(), effects, diagnosis: successDiagnosis() }),
+    );
+
+    expect(renderHuman(withRpc)).toContain("Hop 0 @ wss://relay.example");
+    expect(renderHuman(unknown)).toContain("Hop 1 @ unknown chain");
+  });
+
+  it("renders trace-level fees with location and unknown asset labels", () => {
+    const effects = dryRunEffects({ executionResult: executionSuccess(), xcmVersion: 4 });
+    const baseHop = hop({ index: 0, chain: chainRef({ name: "Relay" }), effects, diagnosis: successDiagnosis() });
+    const withLocationFee = traceResult({
+      hops: [baseHop],
+      diagnosis: baseHop.diagnosis,
+      fees: feeEstimate({ fee: 1n, asset: assetId({ location: { parents: 0, interior: "Here" } }) }),
+    });
+    const withUnknownFee = traceResult({
+      hops: [baseHop],
+      diagnosis: baseHop.diagnosis,
+      fees: feeEstimate({ fee: 2n, asset: assetId({}) }),
+    });
+
+    expect(renderHuman(withLocationFee)).toContain('Fee: 1 location {"parents":0,"interior":"Here"}');
+    expect(renderHuman(withUnknownFee)).toContain("Fee: 2 unknown asset");
+  });
+
+  it("formats defensive normalized event values", () => {
+    expect(
+      formatEvents([
+        { pallet: "System", name: "Remarked", data: 1n as unknown as ReturnType<typeof normalizedEvent>["data"] },
+        { pallet: "System", name: "Remarked", data: "raw" as unknown as ReturnType<typeof normalizedEvent>["data"] },
+      ]),
+    ).toEqual(["  System.Remarked 1", "  System.Remarked raw"]);
+  });
+
+  it("formats empty forwarded XCM programs explicitly", () => {
+    expect(formatForwardedXcms([forwardedXcm(location(1), [xcmProgram(4)])])).toContain("    message 0: v4 (empty)");
+  });
+
+  it("formats raw effects for success and failures without details", () => {
+    expect(formatRawEffects(dryRunEffects({ executionResult: executionSuccess(), xcmVersion: 4 }))).toContain(
+      "  executionResult: success",
+    );
+    expect(
+      formatRawEffects(
+        dryRunEffects({ executionResult: executionFailure(executionError("Barrier")), xcmVersion: 4 }),
+      ),
+    ).toContain("  executionResult: failure (Barrier)");
   });
 });
 

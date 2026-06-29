@@ -57,6 +57,7 @@ export async function runCli(argv: readonly string[]): Promise<void> {
 
 /** Narrow commander's option bag (typed as a loose record) into our typed flags. */
 function parseFlags(raw: unknown): TraceFlags {
+  /* v8 ignore next -- Commander action handlers provide an option object; this guards malformed internal calls. */
   if (typeof raw !== "object" || raw === null) throw new Error("Invalid CLI options.");
   const bag = raw as Record<string, unknown>;
   return {
@@ -81,20 +82,25 @@ function optionalString(bag: Record<string, unknown>, key: string): string | und
 
 /** Build a validated TraceRequest. Exactly one of --call | --xcm is required. */
 function toRequest(flags: TraceFlags): TraceRequest {
-  if ((flags.call === undefined) === (flags.xcm === undefined)) {
+  if (flags.call !== undefined && flags.xcm !== undefined) {
     throw new Error("Provide exactly one of --call or --xcm.");
   }
+  if (flags.call !== undefined) return callRequest(flags, flags.call);
   if (flags.xcm !== undefined) {
     // TODO(verify: raw-XCM input needs a JSON→XcmProgram parser/validator and client.dryRunXcm;
     // neither exists in Sprint 0. Enable once both land.)
     throw new Error("Raw XCM input (--xcm) is not supported in this build; pass --call.");
   }
+  throw new Error("Provide exactly one of --call or --xcm.");
+}
+
+function callRequest(flags: TraceFlags, call: string): TraceRequest {
   return {
     rpc: flags.rpc,
     origin: accountOrigin(flags.origin),
     resultXcmVersion: DEFAULT_XCM_VERSION,
     format: parseFormat(flags.format),
-    call: asHex(requireDefined(flags.call, "--call")),
+    call: asHex(call),
   };
 }
 
@@ -108,9 +114,4 @@ function asHex(value: string): HexString {
     throw new Error("--call must be a 0x-prefixed, even-length SCALE hex string.");
   }
   return value as HexString;
-}
-
-function requireDefined<T>(value: T | undefined, label: string): T {
-  if (value === undefined) throw new Error(`Missing ${label}.`);
-  return value;
 }

@@ -12,6 +12,9 @@ export default defineConfig({
         "src/**/*.test.ts",
         "src/**/*.it.test.ts",
         "src/**/__fixtures__/**",
+        // Type-only modules erase to no executable JS, so V8 cannot produce meaningful runtime coverage for them.
+        "src/client/papi-shapes.ts",
+        "src/types/json.ts",
       ],
       thresholds: {
         statements: COVERAGE_THRESHOLD,
