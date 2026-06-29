@@ -58,9 +58,9 @@ readable diagnosis, fee estimate) first; V2 adds multi-hop chaining.
 Current Sprint-0 runnable CLI surface is single-hop `--call` tracing only. The
 `--xcm` flag is intentionally guarded and rejected until the raw-XCM
 `dryRunXcm` path, JSON input validation, and runtime API call shape are verified.
-The repo now includes the opt-in live RPC harness, debug-flow proof, local Make
-shortcuts, a coverage gate, and CI workflows for quality, workflow linting, and
-production dependency audit.
+The repo now includes a local/forked Chopsticks XCM harness, the opt-in live RPC
+dry-run harness, debug-flow proof, local Make shortcuts, a coverage gate, and CI
+workflows for quality, workflow linting, and production dependency audit.
 
 ## Architecture
 
@@ -97,6 +97,32 @@ node dist/cli/index.js trace --rpc wss://... --origin //Alice --xcm ./program.js
 For the complete user workflow, output formats, coverage gate, and live
 integration env vars, see [`docs/usage.md`](./docs/usage.md).
 
+## Local XCM workflow
+
+The top-level `infra:*` and `xcm:*` commands target a local/forked Chopsticks
+topology, not public network broadcast:
+
+```bash
+make infra-up
+make infra-status
+
+# Provide a verified SCALE call for the origin local endpoint.
+CARTOGRAPHER_LOCAL_CALL='0x...' make xcm-send
+
+make xcm-test
+make xcm-cli
+make infra-down
+```
+
+Defaults use `infra/chopsticks/westend.yml`,
+`infra/chopsticks/westend-asset-hub.yml`, and
+`infra/chopsticks/westend-people.yml`, exposed at `ws://127.0.0.1:8002`,
+`ws://127.0.0.1:8000`, and `ws://127.0.0.1:8001` respectively.
+
+`xcm-send` signs and submits the configured call to the local origin fork with a
+dev signer. It refuses non-local endpoints and fails early when
+`CARTOGRAPHER_LOCAL_CALL` is missing. Runtime API dry-runs remain separate.
+
 ## Local gates
 
 Run the same local quality chain before handing off a change:
@@ -110,7 +136,7 @@ make check
 This runs lint and complexity gates, typecheck, unit tests, coverage, dependency
 boundaries, and the production build.
 
-## Live integration handoff
+## Live dry-run handoff
 
 These tests hit live RPC only when real env values are supplied. A passing
 no-env run is harness proof, not live product proof. See
@@ -120,14 +146,15 @@ contract.
 ```bash
 pnpm test:it
 pnpm test:debug-flow
-pnpm run xcm:test
-pnpm run xcm:cli
+pnpm run live:xcm:test
+pnpm run live:xcm:cli
 pnpm run test:live
 ```
 
 `.env.example` lists the required variables. Export real values before using the
-`xcm:*` and `test:live` scripts; those scripts fail fast when required live
-inputs are missing or still set to the example placeholders.
+`live:*` and `test:live` scripts; those scripts fail fast when required live
+inputs are missing or still set to the example placeholders. The non-`live:*`
+`xcm:*` scripts use local Chopsticks endpoints.
 
 ## CI
 

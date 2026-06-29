@@ -6,8 +6,8 @@ dist/
 
 # Local planning and agent workspace
 _workspace/
-docs/prompts/
 docs/superpowers/
+.cartographer-local/
 
 # Test and coverage output
 coverage/
@@ -37,7 +37,11 @@ pnpm-debug.log*
 .DS_Store
 
 # Local AI assistant state
-.claude/
+.claude/*
+!.claude/agents/
+!.claude/agents/**
+!.claude/skills/
+!.claude/skills/**
 .codex/
 .cursor/
 .continue/
