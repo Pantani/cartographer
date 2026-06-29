@@ -86,14 +86,17 @@ real diagnostics fixtures, CLI honesty, and final QA evidence.
 
 **Trigger:** For Cartographer next-step work involving PAPI live verification,
 dry-run corpus capture, diagnostics refinement, `--xcm`/CLI decisions,
-integration tests, QA acceptance, reruns, updates, fixes, or result
-improvements, use the `cartographer-next-steps-orchestrator` skill. Simple
-questions can be answered directly.
+integration tests, full debug-flow builds, `test:debug-flow`, QA acceptance,
+reruns, updates, fixes, or result improvements, use the
+`cartographer-next-steps-orchestrator` skill. Simple questions can be answered
+directly.
 
 **Change History:**
+
 | Date | Change | Target | Reason |
 |------|--------|--------|--------|
 | 2026-06-28 | Initial next-steps harness | `.claude/agents`, `.claude/skills`, `CLAUDE.md` | Coordinate post-Sprint-0 live verification and integration work |
+| 2026-06-29 | Added debug-flow integration builder | `.claude/agents`, `.claude/skills`, `CLAUDE.md` | Create a dedicated harness lane for complete debug-flow integration tests |
 
 ## Glossary (for agents not native to Polkadot)
 - **XCM**: a program of instructions executed by the destination chain's VM.
