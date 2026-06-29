@@ -18,6 +18,30 @@ describe("cartographer live command helpers", () => {
     expect(findMissingEnv(clientEnvNames, env)).toEqual(["CARTOGRAPHER_IT_CALL"]);
   });
 
+  it("rejects unchanged placeholder values for the client live dry-run", () => {
+    const env = {
+      CARTOGRAPHER_IT_RPC: "wss://asset-hub-polkadot-rpc.example",
+      CARTOGRAPHER_IT_ACCOUNT: "5...",
+      CARTOGRAPHER_IT_CALL: "0x...",
+    };
+
+    expect(findMissingEnv(clientEnvNames, env)).toEqual([
+      "CARTOGRAPHER_IT_RPC",
+      "CARTOGRAPHER_IT_ACCOUNT",
+      "CARTOGRAPHER_IT_CALL",
+    ]);
+  });
+
+  it.each(["deadbeef", "0xzz", "0x1", "0x"])("rejects invalid live call hex '%s'", (call) => {
+    const env = {
+      CARTOGRAPHER_IT_RPC: "wss://example",
+      CARTOGRAPHER_IT_ACCOUNT: "5Example",
+      CARTOGRAPHER_IT_CALL: call,
+    };
+
+    expect(findMissingEnv(clientEnvNames, env)).toEqual(["CARTOGRAPHER_IT_CALL"]);
+  });
+
   it("requires full live trace inputs for the full integration suite", () => {
     const env = {
       CARTOGRAPHER_IT_RPC: "wss://example",
@@ -31,7 +55,7 @@ describe("cartographer live command helpers", () => {
 
   it("formats a command-ready missing env message", () => {
     expect(formatMissingEnvMessage("xcm:test", ["CARTOGRAPHER_IT_CALL"])).toBe(
-      "xcm:test requires CARTOGRAPHER_IT_CALL. Export the missing values and rerun the command.",
+      "xcm:test requires real values for CARTOGRAPHER_IT_CALL. Export real values and rerun the command.",
     );
   });
 
@@ -67,12 +91,44 @@ describe("cartographer live command helpers", () => {
     expect(args).toContain("0x0102");
   });
 
+  it("falls back to CARTOGRAPHER_IT_CALL when CARTOGRAPHER_IT_CALL_OK is unchanged placeholder text", () => {
+    const args = buildTraceArgs({
+      CARTOGRAPHER_IT_RPC: "wss://example",
+      CARTOGRAPHER_IT_ACCOUNT: "5Example",
+      CARTOGRAPHER_IT_CALL: "0x0102",
+      CARTOGRAPHER_IT_CALL_OK: "0x...",
+    });
+
+    expect(args).toContain("0x0102");
+  });
+
+  it("falls back to CARTOGRAPHER_IT_CALL when CARTOGRAPHER_IT_CALL_OK is invalid hex", () => {
+    const args = buildTraceArgs({
+      CARTOGRAPHER_IT_RPC: "wss://example",
+      CARTOGRAPHER_IT_ACCOUNT: "5Example",
+      CARTOGRAPHER_IT_CALL: "0x0102",
+      CARTOGRAPHER_IT_CALL_OK: "0x1",
+    });
+
+    expect(args).toContain("0x0102");
+  });
+
   it("rejects CLI args when no live call is configured", () => {
     expect(() =>
       buildTraceArgs({
         CARTOGRAPHER_IT_RPC: "wss://example",
         CARTOGRAPHER_IT_ACCOUNT: "5Example",
       }),
-    ).toThrow("xcm:cli requires CARTOGRAPHER_IT_CALL_OK or CARTOGRAPHER_IT_CALL.");
+    ).toThrow("xcm:cli requires real values for CARTOGRAPHER_IT_CALL_OK or CARTOGRAPHER_IT_CALL.");
+  });
+
+  it("rejects CLI args when all configured calls are invalid hex", () => {
+    expect(() =>
+      buildTraceArgs({
+        CARTOGRAPHER_IT_RPC: "wss://example",
+        CARTOGRAPHER_IT_ACCOUNT: "5Example",
+        CARTOGRAPHER_IT_CALL: "0x1",
+      }),
+    ).toThrow("xcm:cli requires real values for CARTOGRAPHER_IT_CALL_OK or CARTOGRAPHER_IT_CALL.");
   });
 });

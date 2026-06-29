@@ -198,7 +198,7 @@ SCALE-encoded `--call` and follows the runtime API dry-run result.
 `pnpm test:it` and `pnpm test:debug-flow` are permissive by design and skip live
 cases when env vars are missing. `pnpm run xcm:test`, `pnpm run xcm:cli`, and
 `pnpm run test:live` are handoff commands: they check required env vars first
-and fail fast when an input is missing.
+and fail fast when an input is missing or still set to an example placeholder.
 
 ## Live Integration Inputs
 

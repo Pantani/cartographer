@@ -127,7 +127,7 @@ pnpm run test:live
 
 `.env.example` lists the required variables. Export real values before using the
 `xcm:*` and `test:live` scripts; those scripts fail fast when required live
-inputs are missing.
+inputs are missing or still set to the example placeholders.
 
 ## CI
 
