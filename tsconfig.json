@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "declaration": true,
+    "sourceMap": true,
+    "skipLibCheck": true
+  },
+  "//": "Base config: type-checks ALL of src (incl. tests + fixtures). Used by `pnpm typecheck` and ESLint's projectService. Emit is done by tsconfig.build.json.",
+  "include": ["src/**/*.ts"]
+}

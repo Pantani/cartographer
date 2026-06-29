@@ -1,0 +1,5 @@
+{
+  "//": "Emit-only config: compiles src to dist, excluding tests and fixtures. Used by `pnpm build`.",
+  "extends": "./tsconfig.json",
+  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.it.test.ts", "**/__fixtures__/**"]
+}

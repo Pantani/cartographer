@@ -1,0 +1,23 @@
+{
+  "source_endpoint": "https://polkadot-asset-hub-rpc.polkadot.io",
+  "chain": "Polkadot Asset Hub",
+  "capture_date_utc": "2026-06-28T11:40:20.224Z",
+  "runtime_identity": {
+    "specName": "statemint",
+    "implName": "statemint",
+    "authoringVersion": 1,
+    "specVersion": 2003001,
+    "implVersion": 0,
+    "transactionVersion": 15,
+    "stateVersion": 1
+  },
+  "metadata": {
+    "magic": "meta",
+    "version_byte": 14,
+    "file": "polkadot_asset_hub_runtime_metadata_v14.hex",
+    "byte_length": 579416,
+    "hex_file_size_bytes": 1158835,
+    "sha256": "3ddb42fecaeeb14787fec14eab5722b6e73b55a6c5381e5e3b065864c44f685d"
+  },
+  "fetch_command": "cd spikes/go-runtime-api-smoke && rtk proxy node - <<'NODE' # HTTP JSON-RPC POST to https://polkadot-asset-hub-rpc.polkadot.io for system_chain, chain_getRuntimeVersion, and state_getMetadata; writes state_getMetadata result.result verbatim plus newline to internal/metadatadecode/testdata/polkadot_asset_hub_runtime_metadata_v14.hex"
+}

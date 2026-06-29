@@ -1,0 +1,343 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderHuman > renders the failure trace deterministically 1`] = `
+"Cartographer trace
+==================
+Hop 0 @ Bridge Hub
+FAILURE — the message did not execute as intended.
+Root cause: The destination's entry barrier rejected the message.
+Explanation: The origin location is not in the destination's allowed-origin set.
+Rule: barrier-blocked
+Suggestions:
+  - Verify the origin chain is trusted by the destination.
+  - Check the destination's barrier / allowed-origin configuration.
+Fee: 9876543210 DOT
+Events:
+  PolkadotXcm.Attempted {"outcome":"Error"}
+Forwarded XCM: none
+"
+`;
+
+exports[`renderHuman > renders the forwarded trace deterministically 1`] = `
+"Cartographer trace
+==================
+Hop 0 @ Relay Chain
+SUCCESS — the message executed without error.
+Explanation: The first hop executed and queued a message for the next destination.
+Events:
+  PolkadotXcm.Sent {"count":"1"}
+Forwarded XCM:
+  destination {"parents":1,"interior":{"X1":{"Parachain":"2000"}}}
+    message 0: v4 ReserveAssetDeposited, ClearOrigin
+"
+`;
+
+exports[`renderHuman > renders the success trace deterministically 1`] = `
+"Cartographer trace
+==================
+Hop 0 @ Asset Hub
+SUCCESS — the message executed without error.
+Explanation: All instructions executed; holding register empty.
+Fee: 12345678900 DOT (weight: refTime=2000000000, proofSize=65536)
+Events:
+  Balances.Withdraw {"who":"0xabc","amount":"1000000000"}
+  PolkadotXcm.Attempted {"outcome":"Complete"}
+Forwarded XCM: none
+"
+`;
+
+exports[`renderHuman > renders the unknown trace deterministically 1`] = `
+"Cartographer trace
+==================
+Hop 0 @ Parachain 2000
+UNKNOWN — no diagnostic rule matched; inspect the raw effects below.
+Explanation: No diagnostic rule matched. Inspect the raw effects below.
+Raw effects:
+  executionResult: failure (Unknown: unmapped XCM error variant)
+  events:
+  System.ExtrinsicFailed {"error":"Module(7)"}
+  PolkadotXcm.Attempted {"outcome":"Incomplete"}
+Forwarded XCM: none
+"
+`;
+
+exports[`renderJson > renders the failure trace deterministically 1`] = `
+"{
+  "hops": [
+    {
+      "index": 0,
+      "chain": {
+        "rpc": "wss://bridge-hub.example",
+        "name": "Bridge Hub"
+      },
+      "effects": {
+        "executionResult": {
+          "kind": "failure",
+          "error": {
+            "type": "Barrier",
+            "detail": "origin not allowed by entry barrier"
+          }
+        },
+        "xcmVersion": 4,
+        "events": [
+          {
+            "pallet": "PolkadotXcm",
+            "name": "Attempted",
+            "data": {
+              "outcome": "Error"
+            }
+          }
+        ],
+        "forwardedXcms": []
+      },
+      "diagnosis": {
+        "status": "failure",
+        "ruleId": "barrier-blocked",
+        "rootCause": "The destination's entry barrier rejected the message.",
+        "explanation": "The origin location is not in the destination's allowed-origin set.",
+        "suggestions": [
+          "Verify the origin chain is trusted by the destination.",
+          "Check the destination's barrier / allowed-origin configuration."
+        ]
+      },
+      "fees": {
+        "fee": {
+          "$bigint": "9876543210"
+        },
+        "asset": {
+          "symbol": "DOT",
+          "decimals": 10
+        }
+      }
+    }
+  ],
+  "diagnosis": {
+    "status": "failure",
+    "ruleId": "barrier-blocked",
+    "rootCause": "The destination's entry barrier rejected the message.",
+    "explanation": "The origin location is not in the destination's allowed-origin set.",
+    "suggestions": [
+      "Verify the origin chain is trusted by the destination.",
+      "Check the destination's barrier / allowed-origin configuration."
+    ]
+  },
+  "fees": {
+    "fee": {
+      "$bigint": "9876543210"
+    },
+    "asset": {
+      "symbol": "DOT",
+      "decimals": 10
+    }
+  }
+}"
+`;
+
+exports[`renderJson > renders the forwarded trace deterministically 1`] = `
+"{
+  "hops": [
+    {
+      "index": 0,
+      "chain": {
+        "rpc": "wss://relay.example",
+        "name": "Relay Chain"
+      },
+      "effects": {
+        "executionResult": {
+          "kind": "success"
+        },
+        "xcmVersion": 4,
+        "events": [
+          {
+            "pallet": "PolkadotXcm",
+            "name": "Sent",
+            "data": {
+              "count": {
+                "$bigint": "1"
+              }
+            }
+          }
+        ],
+        "forwardedXcms": [
+          {
+            "destination": {
+              "parents": 1,
+              "interior": {
+                "X1": {
+                  "Parachain": {
+                    "$bigint": "2000"
+                  }
+                }
+              }
+            },
+            "messages": [
+              {
+                "version": 4,
+                "instructions": [
+                  {
+                    "kind": "ReserveAssetDeposited",
+                    "args": [
+                      {
+                        "id": "DOT",
+                        "fun": {
+                          "$bigint": "500000000"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "kind": "ClearOrigin"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "diagnosis": {
+        "status": "success",
+        "explanation": "The first hop executed and queued a message for the next destination."
+      }
+    }
+  ],
+  "diagnosis": {
+    "status": "success",
+    "explanation": "The first hop executed and queued a message for the next destination."
+  }
+}"
+`;
+
+exports[`renderJson > renders the success trace deterministically 1`] = `
+"{
+  "hops": [
+    {
+      "index": 0,
+      "chain": {
+        "rpc": "wss://asset-hub.example",
+        "name": "Asset Hub"
+      },
+      "effects": {
+        "executionResult": {
+          "kind": "success"
+        },
+        "xcmVersion": 4,
+        "events": [
+          {
+            "pallet": "Balances",
+            "name": "Withdraw",
+            "data": {
+              "who": "0xabc",
+              "amount": {
+                "$bigint": "1000000000"
+              }
+            }
+          },
+          {
+            "pallet": "PolkadotXcm",
+            "name": "Attempted",
+            "data": {
+              "outcome": "Complete"
+            }
+          }
+        ],
+        "forwardedXcms": []
+      },
+      "diagnosis": {
+        "status": "success",
+        "explanation": "All instructions executed; holding register empty."
+      },
+      "fees": {
+        "fee": {
+          "$bigint": "12345678900"
+        },
+        "asset": {
+          "symbol": "DOT",
+          "decimals": 10
+        },
+        "weight": {
+          "refTime": {
+            "$bigint": "2000000000"
+          },
+          "proofSize": {
+            "$bigint": "65536"
+          }
+        }
+      }
+    }
+  ],
+  "diagnosis": {
+    "status": "success",
+    "explanation": "All instructions executed; holding register empty."
+  },
+  "fees": {
+    "fee": {
+      "$bigint": "12345678900"
+    },
+    "asset": {
+      "symbol": "DOT",
+      "decimals": 10
+    },
+    "weight": {
+      "refTime": {
+        "$bigint": "2000000000"
+      },
+      "proofSize": {
+        "$bigint": "65536"
+      }
+    }
+  }
+}"
+`;
+
+exports[`renderJson > renders the unknown trace deterministically 1`] = `
+"{
+  "hops": [
+    {
+      "index": 0,
+      "chain": {
+        "name": "Parachain 2000"
+      },
+      "effects": {
+        "executionResult": {
+          "kind": "failure",
+          "error": {
+            "type": "Unknown",
+            "detail": "unmapped XCM error variant",
+            "raw": {
+              "code": {
+                "$bigint": "255"
+              }
+            }
+          }
+        },
+        "xcmVersion": 3,
+        "events": [
+          {
+            "pallet": "System",
+            "name": "ExtrinsicFailed",
+            "data": {
+              "error": "Module(7)"
+            }
+          },
+          {
+            "pallet": "PolkadotXcm",
+            "name": "Attempted",
+            "data": {
+              "outcome": "Incomplete"
+            }
+          }
+        ],
+        "forwardedXcms": []
+      },
+      "diagnosis": {
+        "status": "unknown",
+        "explanation": "No diagnostic rule matched. Inspect the raw effects below."
+      }
+    }
+  ],
+  "diagnosis": {
+    "status": "unknown",
+    "explanation": "No diagnostic rule matched. Inspect the raw effects below."
+  }
+}"
+`;
