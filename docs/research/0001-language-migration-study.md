@@ -4,6 +4,11 @@
 - Status: Study, not an ADR
 - Scope: Cartographer MVP/V2/V3 language and client stack
 
+Post-commit note, 2026-06-29: the previous `spikes/go-runtime-api-smoke`
+workspace has been removed from the main tree. Treat this study as the migration
+decision framework; recreate a bounded spike only after the TypeScript/PAPI live
+evidence contract is frozen.
+
 ## Executive Summary
 
 Cartographer could be built in Go or Rust, but the best near-term product path is
@@ -238,7 +243,9 @@ line up with the current roadmap.
 
 ## Proposed Next Step
 
-Add a short migration spike milestone before any ADR change:
+Add a short migration spike milestone before any ADR change. Because no active
+spike workspace is kept in the main tree, create it as a fresh bounded artifact
+when this milestone starts:
 
 ```text
 M0.7 Language viability spike

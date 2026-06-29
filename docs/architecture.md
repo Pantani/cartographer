@@ -1,8 +1,9 @@
 # Architecture
 
 This document defines module boundaries and the dependency rules enforced in CI
-(`pnpm depcheck`, dependency-cruiser). ADR-0001 fixes the high-level decision;
-this is the operational detail.
+(`pnpm depcheck`, dependency-cruiser). It also names the quality gates that keep
+the Sprint-0 CLI surface shippable. ADR-0001 fixes the high-level decision; this
+is the operational detail.
 
 ## Module map
 
@@ -45,6 +46,25 @@ Read "A ──▶ B" as "A may import B".
 Each rule exists to protect a property: testability without network (rule 2),
 acyclic build and reasoning (rules 1, 5), contained blast radius for upstream
 breakage (rule 6), and clean layering (rules 3, 4).
+
+## Quality gates
+
+The local all-up gate is `pnpm run check` or `make check`. It runs:
+
+1. `pnpm lint` — type-aware ESLint, cyclomatic complexity <= 10, cognitive
+   complexity <= 10, max nesting depth <= 4, and no explicit `any`.
+2. `pnpm typecheck` — `tsc --noEmit` against `tsconfig.json`.
+3. `pnpm test` — non-live unit tests only.
+4. `pnpm coverage` — non-live coverage with a global 70% floor for statements,
+   branches, functions, and lines.
+5. `pnpm depcheck` — dependency-cruiser layering and cycle checks.
+6. `pnpm build` — production TypeScript build.
+
+CI runs the same quality chain on Node 20.x and 22.x, runs coverage as its own
+job, lints GitHub Actions workflows with `actionlint`, and rolls those checks up
+through `CI Success`. Production dependency audit is separate:
+`.github/workflows/dependency-audit.yml` runs `pnpm audit --prod --audit-level
+moderate` on dependency changes, on a weekly schedule, and by manual dispatch.
 
 ## Why this shape
 

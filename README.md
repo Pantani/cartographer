@@ -52,12 +52,15 @@ a root cause. That gap is Cartographer.
 
 ## Status
 
-Pre-MVP. See [`ROADMAP.md`](./ROADMAP.md). Building the MVP (single-hop, readable
-diagnosis, fee estimate) first; V2 adds multi-hop chaining.
+Pre-MVP. See [`ROADMAP.md`](./ROADMAP.md). Building the MVP (single-hop,
+readable diagnosis, fee estimate) first; V2 adds multi-hop chaining.
 
 Current Sprint-0 runnable CLI surface is single-hop `--call` tracing only. The
 `--xcm` flag is intentionally guarded and rejected until the raw-XCM
 `dryRunXcm` path, JSON input validation, and runtime API call shape are verified.
+The repo now includes the opt-in live RPC harness, debug-flow proof, local Make
+shortcuts, a coverage gate, and CI workflows for quality, workflow linting, and
+production dependency audit.
 
 ## Architecture
 
@@ -94,7 +97,20 @@ node dist/cli/index.js trace --rpc wss://... --origin //Alice --xcm ./program.js
 For the complete user workflow, output formats, coverage gate, and live
 integration env vars, see [`docs/usage.md`](./docs/usage.md).
 
-## Integration test handoff
+## Local gates
+
+Run the same local quality chain before handing off a change:
+
+```bash
+pnpm run check
+# or
+make check
+```
+
+This runs lint and complexity gates, typecheck, unit tests, coverage, dependency
+boundaries, and the production build.
+
+## Live integration handoff
 
 These tests hit live RPC only when real env values are supplied. A passing
 no-env run is harness proof, not live product proof. See
@@ -102,8 +118,24 @@ no-env run is harness proof, not live product proof. See
 contract.
 
 ```bash
-rtk proxy pnpm test:it
+pnpm test:it
+pnpm test:debug-flow
+pnpm run xcm:test
+pnpm run xcm:cli
+pnpm run test:live
 ```
+
+`.env.example` lists the required variables. Export real values before using the
+`xcm:*` and `test:live` scripts; those scripts fail fast when required live
+inputs are missing.
+
+## CI
+
+`.github/workflows/ci.yml` runs the quality gate on Node 20.x and 22.x, checks
+the coverage threshold, lints workflow files with `actionlint`, and rolls those
+jobs up through `CI Success`. `.github/workflows/dependency-audit.yml` runs a
+production `pnpm audit --prod --audit-level moderate` on dependency changes,
+weekly schedule, and manual dispatch.
 
 ## License
 
