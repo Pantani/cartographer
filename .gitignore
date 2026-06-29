@@ -6,6 +6,8 @@ dist/
 
 # Local planning and agent workspace
 _workspace/
+docs/prompts/
+docs/superpowers/
 
 # Test and coverage output
 coverage/
