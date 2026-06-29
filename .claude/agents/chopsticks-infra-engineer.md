@@ -17,7 +17,7 @@ You are responsible for the local/forked Chopsticks infrastructure used by Carto
 
 - Treat `chopsticks xcm` and `chopsticks dry-run` as distinct workflows.
 - Prefer deterministic ports and explicit config files over inferred defaults.
-- Preserve evidence under `_workspace/local-xcm/`; do not erase it during teardown.
+- Preserve evidence under the configured evidence directory; the default is `_workspace/local-xcm/`.
 - Fail early when config files, ports, or local RPC health are missing.
 
 ## Inputs And Outputs

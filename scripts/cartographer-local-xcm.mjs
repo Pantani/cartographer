@@ -4,11 +4,19 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { sr25519CreateDerive } from "@polkadot-labs/hdkd";
+import { DEV_PHRASE, entropyToMiniSecret, mnemonicToEntropy, ss58Address } from "@polkadot-labs/hdkd-helpers";
+import { Binary } from "polkadot-api";
+
 const DEV_ACCOUNT = "//Alice";
 const STATE_FILE = "current.json";
 const DEFAULT_BOOT_TIMEOUT_MS = 120_000;
 const DEFAULT_SEND_TIMEOUT_MS = 120_000;
+const DEFAULT_HEALTH_REQUEST_TIMEOUT_MS = 5_000;
+const DEFAULT_XCM_AMOUNT = 10_000_000_000n;
+const DEFAULT_SS58_PREFIX = 42;
 const CALL_HEX_PATTERN = /^0x(?:[0-9a-fA-F]{2})+$/;
+const NON_NEGATIVE_INTEGER_PATTERN = /^(?:0|[1-9]\d*)$/;
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 export const defaultLocalConfig = {
@@ -66,6 +74,9 @@ export function assertLocalEndpoint(label, endpoint) {
   if (!LOCAL_HOSTS.has(url.hostname)) {
     throw new Error(`${label} endpoint must be local for this workflow.`);
   }
+  if (url.protocol !== "ws:" && url.protocol !== "wss:") {
+    throw new Error(`${label} endpoint must use ws:// or wss:// for this workflow.`);
+  }
 }
 
 export function httpUrlFromRpc(endpoint) {
@@ -83,17 +94,49 @@ export function buildHealthRequest(endpoint) {
 }
 
 export function buildSendPlan(state, env = process.env) {
-  const call = env.CARTOGRAPHER_LOCAL_CALL || state.evidence?.lastCall;
-  if (!isCallHex(call)) {
-    throw new Error("xcm-send requires CARTOGRAPHER_LOCAL_CALL with a 0x-prefixed even-length SCALE call.");
-  }
   assertLocalEndpoint("origin", state.endpoints.origin);
+  assertLocalEndpoint("destination", state.endpoints.destination);
+  const call = selectLocalCall(env.CARTOGRAPHER_LOCAL_CALL, state.evidence?.lastCall);
   return {
     rpcUrl: state.endpoints.origin,
+    destinationRpcUrl: state.endpoints.destination,
     accountUri: env.CARTOGRAPHER_LOCAL_ACCOUNT || DEV_ACCOUNT,
-    call,
+    call: call.value,
+    callSource: call.source,
     evidenceDir: state.evidence.runDir,
+    amount: parseLocalXcmAmount(env.CARTOGRAPHER_LOCAL_XCM_AMOUNT),
   };
+}
+
+/** Build runtime-typed XCM transfer args for the pinned local Asset Hub to People topology. */
+export function buildDefaultXcmTransferArgs({ destinationParaId, recipientPublicKey, amount }) {
+  return {
+    dest: versionedXcm(location(1, { type: "X1", value: { type: "Parachain", value: destinationParaId } })),
+    beneficiary: versionedXcm(
+      location(0, {
+        type: "X1",
+        value: { type: "AccountId32", value: { network: undefined, id: Binary.fromBytes(recipientPublicKey) } },
+      }),
+    ),
+    assets: versionedXcm([
+      {
+        id: location(1, { type: "Here" }),
+        fun: { type: "Fungible", value: amount },
+      },
+    ]),
+    fee_asset_item: 0,
+    weight_limit: { type: "Unlimited" },
+  };
+}
+
+/** Serialize local evidence without losing bigint values returned by runtime APIs. */
+export function jsonStringify(value) {
+  return JSON.stringify(value, jsonReplacer, 2);
+}
+
+/** Derive the SS58 account string required by DryRunApi from a local dev SURI. */
+export function deriveLocalAccountAddress(accountUri, phrase = process.env.CARTOGRAPHER_LOCAL_DEV_PHRASE || DEV_PHRASE) {
+  return ss58Address(createLocalKeyPair(accountUri, phrase).publicKey, DEFAULT_SS58_PREFIX);
 }
 
 export function buildCliTraceArgs(state, env = process.env) {
@@ -108,7 +151,7 @@ export function buildCliTraceArgs(state, env = process.env) {
     "--rpc",
     state.endpoints.origin,
     "--origin",
-    env.CARTOGRAPHER_LOCAL_ACCOUNT || DEV_ACCOUNT,
+    deriveLocalAccountAddress(env.CARTOGRAPHER_LOCAL_ACCOUNT || DEV_ACCOUNT),
     "--call",
     call,
     "--format",
@@ -138,6 +181,43 @@ export function formatStatus(status) {
   return lines.join("\n");
 }
 
+/** Throw when a local evidence status contains any failed RPC health check. */
+export function assertHealthyStatus(status) {
+  if (allHealthy(status.health)) return;
+  throw new Error(`Local XCM health check failed.\n${formatStatus(status)}`);
+}
+
+/** Throw when a finalized local transaction result is not successful. */
+export function assertSuccessfulTx(result, summary) {
+  if (result.ok === true) return;
+  throw new Error(`${summary}\nLocal XCM transaction did not finalize successfully.${formatDispatchError(result.dispatchError)}`);
+}
+
+function formatDispatchError(dispatchError) {
+  if (dispatchError === undefined) return "";
+  return `\ndispatch error: ${jsonStringify(dispatchError)}`;
+}
+
+/** Watch Chopsticks boot and reject if the child cannot spawn or exits too early. */
+export function watchBootProcess(child) {
+  let onError = () => {};
+  let onExit = () => {};
+  const failure = new Promise((_, reject) => {
+    onError = (error) => reject(new Error(`Failed to start Chopsticks: ${error.message}`));
+    onExit = (code, signal) =>
+      reject(new Error(`Chopsticks exited before local RPCs became healthy (code ${code ?? "unknown"}, signal ${signal ?? "none"}).`));
+    child.once("error", onError);
+    child.once("exit", onExit);
+  });
+  return {
+    failure,
+    cleanup: () => {
+      child.off("error", onError);
+      child.off("exit", onExit);
+    },
+  };
+}
+
 async function commandUp(config, env = process.env) {
   await assertConfigFiles(config);
   await fs.mkdir(config.stateDir, { recursive: true });
@@ -162,6 +242,7 @@ async function commandUp(config, env = process.env) {
       openSync(runPaths.stderrLog, "a"),
     ],
   });
+  const bootWatch = watchBootProcess(child);
   child.unref();
 
   const state = {
@@ -183,9 +264,18 @@ async function commandUp(config, env = process.env) {
   await writeJson(statePath, state);
 
   const timeoutMs = Number(env.CARTOGRAPHER_LOCAL_BOOT_TIMEOUT_MS || DEFAULT_BOOT_TIMEOUT_MS);
-  const health = await waitForHealthy(config.endpoints, timeoutMs);
+  const healthTimeoutMs = Number(env.CARTOGRAPHER_LOCAL_HEALTH_TIMEOUT_MS || DEFAULT_HEALTH_REQUEST_TIMEOUT_MS);
+  let health;
+  try {
+    health = await Promise.race([waitForHealthy(config.endpoints, timeoutMs, healthTimeoutMs), bootWatch.failure]);
+  } catch (error) {
+    await cleanupBootFailure(statePath, state.pid);
+    throw error;
+  } finally {
+    bootWatch.cleanup();
+  }
   if (!allHealthy(health)) {
-    await killTrackedProcess(state.pid);
+    await cleanupBootFailure(statePath, state.pid);
     throw new Error(`Chopsticks did not become healthy within ${timeoutMs}ms.\n${formatStatus({
       statePath,
       pid: state.pid,
@@ -238,31 +328,39 @@ async function commandSend(config, env = process.env) {
     ...state,
     evidence: {
       ...state.evidence,
-      lastCall: plan.call,
+      lastCall: result.call,
+      lastGeneratedCall: result.generatedCall,
       lastSendResult: path.join(plan.evidenceDir, "xcm-send-result.json"),
     },
   };
   await writeJson(nextState.evidence.lastSendResult, result);
   await writeJson(statePath, nextState);
-  return formatSendResult(result, nextState.evidence.lastSendResult);
+  const summary = formatSendResult(result, nextState.evidence.lastSendResult);
+  assertSuccessfulTx(result, summary);
+  return summary;
 }
 
 async function commandTest(config) {
   const statePath = path.join(config.stateDir, STATE_FILE);
   const state = await requireRunningState(statePath);
   const health = await checkAllHealth(state.endpoints);
+  const healthStatus = { statePath, pid: state.pid, processAlive: true, endpoints: state.endpoints, health };
+  assertHealthyStatus(healthStatus);
   const sendResultPath = state.evidence?.lastSendResult;
   if (!sendResultPath) {
-    throw new Error("xcm-test requires prior xcm-send evidence. Run make xcm-send after setting CARTOGRAPHER_LOCAL_CALL.");
+    throw new Error("xcm-test requires prior xcm-send evidence. Run make xcm-send first.");
   }
   const result = await readJson(sendResultPath);
-  return [
+  const lines = [
     "Local XCM evidence:",
-    formatStatus({ statePath, pid: state.pid, processAlive: true, endpoints: state.endpoints, health }),
+    formatStatus(healthStatus),
     `send evidence: ${sendResultPath}`,
     `tx hash: ${result.txHash ?? "(unknown)"}`,
     `finalized ok: ${String(result.ok ?? false)}`,
-  ].join("\n");
+  ];
+  const summary = lines.join("\n");
+  assertSuccessfulTx(result, summary);
+  return summary;
 }
 
 async function commandCli(config, env = process.env) {
@@ -337,7 +435,12 @@ async function readJson(file) {
 
 async function writeJson(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`);
+  await fs.writeFile(file, `${jsonStringify(value)}\n`);
+}
+
+async function cleanupBootFailure(statePath, pid) {
+  await killTrackedProcess(pid);
+  await fs.rm(statePath, { force: true });
 }
 
 function isPidAlive(pid) {
@@ -350,37 +453,48 @@ function isPidAlive(pid) {
   }
 }
 
-async function waitForHealthy(endpoints, timeoutMs) {
+async function waitForHealthy(endpoints, timeoutMs, healthTimeoutMs = DEFAULT_HEALTH_REQUEST_TIMEOUT_MS) {
   const start = Date.now();
-  let last = await checkAllHealth(endpoints);
+  let last = await checkAllHealth(endpoints, healthTimeoutMs);
   while (!allHealthy(last) && Date.now() - start < timeoutMs) {
     await delay(1_000);
-    last = await checkAllHealth(endpoints);
+    last = await checkAllHealth(endpoints, healthTimeoutMs);
   }
   return last;
 }
 
-async function checkAllHealth(endpoints) {
+async function checkAllHealth(endpoints, timeoutMs = DEFAULT_HEALTH_REQUEST_TIMEOUT_MS) {
   const entries = await Promise.all(
-    Object.entries(endpoints).map(async ([label, endpoint]) => [label, await checkHealth(endpoint)]),
+    Object.entries(endpoints).map(async ([label, endpoint]) => [label, await checkHealth(endpoint, timeoutMs)]),
   );
   return Object.fromEntries(entries);
 }
 
-async function checkHealth(endpoint) {
+export async function checkHealth(endpoint, timeoutMs = DEFAULT_HEALTH_REQUEST_TIMEOUT_MS, fetchImpl = fetch) {
   try {
     assertLocalEndpoint("health", endpoint);
     const request = buildHealthRequest(endpoint);
-    const response = await fetch(request.url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(request.body),
-    });
+    const response = await fetchHealth(request, timeoutMs, fetchImpl);
     const payload = await response.json();
     if (payload.error) return { ok: false, detail: payload.error.message || "RPC error" };
     return { ok: true, detail: `header ${payload.result?.hash ?? "ok"}` };
   } catch (error) {
     return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function fetchHealth(request, timeoutMs, fetchImpl) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchImpl(request.url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request.body),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -422,33 +536,90 @@ function gitSha(cwd) {
 }
 
 async function submitLocalCall(plan, timeoutMs) {
-  const [{ Binary, createClient }, { getWsProvider }, { withPolkadotSdkCompat }] = await Promise.all([
+  const prepared = await prepareLocalCall(plan);
+  const [{ createClient }, { getWsProvider }, { withPolkadotSdkCompat }] = await Promise.all([
     import("polkadot-api"),
     import("polkadot-api/ws-provider"),
     import("polkadot-api/polkadot-sdk-compat"),
   ]);
+  const client = createClient(withPolkadotSdkCompat(getWsProvider(prepared.rpcUrl)));
+  try {
+    const api = client.getUnsafeApi();
+    const tx = await api.txFromCallData(Binary.fromHex(prepared.call));
+    const signer = await createLocalSigner(prepared.accountUri);
+    const result = await withTimeout(tx.signAndSubmit(signer), timeoutMs, "xcm-send timed out waiting for finalized local tx.");
+    return normalizeTxResult(result, prepared);
+  } finally {
+    client.destroy();
+  }
+}
+
+async function prepareLocalCall(plan) {
+  if (plan.call) return plan;
+  const generated = await generateDefaultLocalXcmCall(plan);
+  return { ...plan, call: generated.call, generatedCall: generated.details };
+}
+
+async function generateDefaultLocalXcmCall(plan) {
+  const [{ createClient }, { getWsProvider }, { withPolkadotSdkCompat }] = await Promise.all([
+    import("polkadot-api"),
+    import("polkadot-api/ws-provider"),
+    import("polkadot-api/polkadot-sdk-compat"),
+  ]);
+  const destinationParaId = await readDestinationParaId(plan.destinationRpcUrl, {
+    createClient,
+    getWsProvider,
+    withPolkadotSdkCompat,
+  });
+  const keyPair = await createLocalKeyPair(plan.accountUri);
   const client = createClient(withPolkadotSdkCompat(getWsProvider(plan.rpcUrl)));
   try {
     const api = client.getUnsafeApi();
-    const tx = await api.txFromCallData(Binary.fromHex(plan.call));
-    const signer = await createLocalSigner(plan.accountUri);
-    const result = await withTimeout(tx.signAndSubmit(signer), timeoutMs, "xcm-send timed out waiting for finalized local tx.");
-    return normalizeTxResult(result, plan);
+    await api.runtimeToken;
+    const args = buildDefaultXcmTransferArgs({
+      destinationParaId,
+      recipientPublicKey: keyPair.publicKey,
+      amount: plan.amount,
+    });
+    const tx = api.tx.PolkadotXcm.limited_teleport_assets(args);
+    const encoded = await tx.getEncodedData();
+    return {
+      call: encoded.asHex(),
+      details: {
+        pallet: "PolkadotXcm",
+        method: "limited_teleport_assets",
+        destinationParaId,
+        recipientAccountUri: plan.accountUri,
+        amount: plan.amount,
+      },
+    };
+  } finally {
+    client.destroy();
+  }
+}
+
+async function readDestinationParaId(rpcUrl, sdk) {
+  const client = sdk.createClient(sdk.withPolkadotSdkCompat(sdk.getWsProvider(rpcUrl)));
+  try {
+    const api = client.getUnsafeApi();
+    await api.runtimeToken;
+    return await api.query.ParachainInfo.ParachainId.getValue();
   } finally {
     client.destroy();
   }
 }
 
 async function createLocalSigner(accountUri) {
-  const [{ sr25519CreateDerive }, helpers, { getPolkadotSigner }] = await Promise.all([
-    import("@polkadot-labs/hdkd"),
-    import("@polkadot-labs/hdkd-helpers"),
+  const [keyPair, { getPolkadotSigner }] = await Promise.all([
+    createLocalKeyPair(accountUri),
     import("polkadot-api/signer"),
   ]);
-  const phrase = process.env.CARTOGRAPHER_LOCAL_DEV_PHRASE || helpers.DEV_PHRASE;
-  const miniSecret = helpers.entropyToMiniSecret(helpers.mnemonicToEntropy(phrase));
-  const keyPair = sr25519CreateDerive(miniSecret)(accountUri);
   return getPolkadotSigner(keyPair.publicKey, "Sr25519", keyPair.sign);
+}
+
+function createLocalKeyPair(accountUri, phrase = process.env.CARTOGRAPHER_LOCAL_DEV_PHRASE || DEV_PHRASE) {
+  const miniSecret = entropyToMiniSecret(mnemonicToEntropy(phrase));
+  return sr25519CreateDerive(miniSecret)(accountUri);
 }
 
 async function withTimeout(promise, ms, message) {
@@ -473,6 +644,9 @@ function normalizeTxResult(result, plan) {
     rpcUrl: plan.rpcUrl,
     accountUri: plan.accountUri,
     call: plan.call,
+    callSource: plan.callSource,
+    generatedCall: plan.generatedCall,
+    amount: plan.amount,
     submittedAt: new Date().toISOString(),
   };
 }
@@ -480,12 +654,49 @@ function normalizeTxResult(result, plan) {
 function formatSendResult(result, evidencePath) {
   return [
     "Local XCM transaction submitted to Chopsticks.",
+    `call source: ${result.callSource}`,
     `tx hash: ${result.txHash ?? "(unknown)"}`,
     `ok: ${String(result.ok)}`,
     `block: ${result.block?.hash ?? result.block ?? "(unknown)"}`,
     `events: ${Array.isArray(result.events) ? result.events.length : "unknown"}`,
     `evidence: ${evidencePath}`,
   ].join("\n");
+}
+
+function selectLocalCall(envCall, stateCall) {
+  if (envCall) return requireCallHex(envCall, "CARTOGRAPHER_LOCAL_CALL", "env");
+  if (stateCall) return requireCallHex(stateCall, "saved local call", "state");
+  return { value: undefined, source: "generated-default" };
+}
+
+function requireCallHex(value, label, source) {
+  if (!isCallHex(value)) {
+    throw new Error(`${label} must be a 0x-prefixed even-length SCALE call.`);
+  }
+  return { value, source };
+}
+
+function parseLocalXcmAmount(value) {
+  if (value === undefined || value === "") return DEFAULT_XCM_AMOUNT;
+  if (!NON_NEGATIVE_INTEGER_PATTERN.test(value)) {
+    throw new Error("CARTOGRAPHER_LOCAL_XCM_AMOUNT must be a non-negative integer.");
+  }
+  return BigInt(value);
+}
+
+function location(parents, interior) {
+  return { parents, interior };
+}
+
+function versionedXcm(value) {
+  return { type: "V4", value };
+}
+
+function jsonReplacer(_key, value) {
+  if (typeof value === "bigint") return value.toString();
+  if (value && typeof value.asHex === "function") return value.asHex();
+  if (value instanceof Uint8Array) return `0x${Buffer.from(value).toString("hex")}`;
+  return value;
 }
 
 async function main(argv, env = process.env) {

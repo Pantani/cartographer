@@ -18,8 +18,8 @@ The configs are based on the official Chopsticks examples and add fixed local po
 make infra-up
 make infra-status
 
-# Requires a SCALE-encoded local call that is valid on the origin chain.
-CARTOGRAPHER_LOCAL_CALL='0x...' make xcm-send
+# Generates the default local SCALE XCM call when CARTOGRAPHER_LOCAL_CALL is unset.
+make xcm-send
 
 make xcm-test
 make xcm-cli
@@ -40,7 +40,7 @@ pnpm run infra:down
 ## What This Proves
 
 - `infra-up` starts a local/forked relay/parachain XCM setup through `chopsticks xcm`.
-- `xcm-send` signs and submits the configured call to the local origin endpoint with a local dev signer.
+- `xcm-send` signs and submits the generated or configured call to the local origin endpoint with a local dev signer.
 - `xcm-test` checks local process/RPC health and reads the saved send evidence.
 - `xcm-cli` runs the built Cartographer CLI against the local origin endpoint and the same call.
 
@@ -59,5 +59,17 @@ Override defaults with environment variables:
 - `CARTOGRAPHER_LOCAL_RELAY_RPC`
 - `CARTOGRAPHER_LOCAL_ACCOUNT`
 - `CARTOGRAPHER_LOCAL_CALL`
+- `CARTOGRAPHER_LOCAL_XCM_AMOUNT`
 
-`CARTOGRAPHER_LOCAL_CALL` must be a 0x-prefixed, even-length SCALE call. The harness intentionally refuses to invent a route-specific XCM call when that call has not been verified for the selected topology.
+`CARTOGRAPHER_LOCAL_ACCOUNT` is a local dev SURI for signing. `xcm-cli` derives
+the matching SS58 account string before calling `DryRunApi`, because the runtime
+API origin is not a dev SURI.
+
+`CARTOGRAPHER_LOCAL_CALL` is optional. When it is unset, the harness queries the
+local destination parachain id, encodes a default
+`PolkadotXcm.limited_teleport_assets` call through the local origin runtime
+metadata, and stores the generated SCALE call in the run evidence. When set, it
+must be a 0x-prefixed, even-length SCALE call valid on the origin chain.
+
+`CARTOGRAPHER_LOCAL_XCM_AMOUNT` controls the generated call amount and defaults
+to `10000000000`.

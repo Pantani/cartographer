@@ -1,7 +1,7 @@
 # Local XCM Infrastructure With Chopsticks
 
 - Date: 2026-06-29
-- Status: Implemented with configured-call submission boundary
+- Status: Implemented with default generated-call submission boundary
 - Owner: Cartographer local XCM harness
 
 ## Goal
@@ -50,6 +50,7 @@ The local `xcm-send` command must never silently become a runtime API dry-run. I
 5. Keep `.cartographer-local/` gitignored and preserve `_workspace/` evidence for review.
 6. Update ADR-0001 because the test harness will submit extrinsics to a local/forked endpoint while Cartographer's product CLI remains simulation-oriented and public broadcast stays out of scope.
 7. Reconstruct the `.claude` harness because this checkout has no `.claude/` directory even though `CLAUDE.md` points to one.
+8. Generate the default local SCALE call from runtime metadata for the selected Westend Asset Hub -> People topology; keep `CARTOGRAPHER_LOCAL_CALL` as an explicit override.
 
 ## Implementation Plan
 
@@ -69,7 +70,7 @@ The local `xcm-send` command must never silently become a runtime API dry-run. I
    - command argument construction
    - health-check request construction
    - evidence/run directory naming
-   - fail-fast messages for missing local config/call
+   - fail-fast messages for missing local config and invalid call overrides
 6. Implement `scripts/cartographer-local-xcm.mjs` with injectable I/O so unit tests do not start processes or hit the network.
 7. Wire `package.json` and `Makefile` to the local commands, preserving existing live dry-run commands under `live:*`.
 8. Update `.env.example`, README, and `docs/usage.md` with the local workflow and mode boundaries.
@@ -89,7 +90,7 @@ The local `xcm-send` command must never silently become a runtime API dry-run. I
 
 ## Ready Criteria
 
-- Commands fail early when Chopsticks/config/call material is missing.
+- Commands fail early when Chopsticks/config is missing or a configured call override is invalid.
 - Commands reject non-local RPC endpoints for local send/test/cli workflows.
 - `infra-down` only tears down tracked local processes and does not erase durable evidence without saying so.
 - Unit tests cover helper behavior without network or real processes.
@@ -98,8 +99,14 @@ The local `xcm-send` command must never silently become a runtime API dry-run. I
 ## Implementation Note
 
 The harness starts a real local/forked Chopsticks XCM topology and can submit a
-configured local SCALE call through PAPI. It intentionally does not auto-invent a
-route-specific XCM call for Westend Asset Hub -> People because that exact call
-shape/event recipe has not been verified against the selected topology in this
-repo. `xcm-send` therefore requires `CARTOGRAPHER_LOCAL_CALL` and fails before
-submission when it is absent.
+generated or configured local SCALE call through PAPI. The generated default is
+`PolkadotXcm.limited_teleport_assets` for the selected Westend Asset Hub ->
+People topology. It is encoded through the local origin runtime metadata, reads
+the destination parachain id from the local destination runtime, and stores the
+generated SCALE call in evidence. `CARTOGRAPHER_LOCAL_CALL` remains an override
+for prebuilt local calls.
+
+`CARTOGRAPHER_LOCAL_ACCOUNT` stays a local dev SURI for transaction signing.
+The local CLI wrapper derives the matching SS58 account for `DryRunApi` origins;
+passing `//Alice` directly to `DryRunApi.dry_run_call` fails runtime AccountId
+codec validation.

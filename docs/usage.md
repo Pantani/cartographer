@@ -37,16 +37,26 @@ Defaults:
 - `CARTOGRAPHER_LOCAL_ORIGIN_RPC=ws://127.0.0.1:8000`
 - `CARTOGRAPHER_LOCAL_DEST_RPC=ws://127.0.0.1:8001`
 - `CARTOGRAPHER_LOCAL_RELAY_RPC=ws://127.0.0.1:8002`
-- `CARTOGRAPHER_LOCAL_ACCOUNT=//Alice`
+- `CARTOGRAPHER_LOCAL_ACCOUNT=//Alice` (local dev SURI used for signing; `xcm-cli` derives the matching SS58 account for `DryRunApi`)
 
-Required for local transaction submission:
+Default local transaction submission:
 
-- `CARTOGRAPHER_LOCAL_CALL`
+- `make xcm-send` generates a SCALE-encoded `PolkadotXcm.limited_teleport_assets` call when `CARTOGRAPHER_LOCAL_CALL` is unset.
+- The destination parachain id is read from `ParachainInfo.ParachainId` on `CARTOGRAPHER_LOCAL_DEST_RPC`.
+- The call shape is encoded through the local origin runtime metadata; generation fails if the selected runtime does not expose that transaction.
+- The generated call and transaction result are stored under `_workspace/local-xcm/runs/<run-id>/`.
 
-`CARTOGRAPHER_LOCAL_CALL` must be a 0x-prefixed, even-length SCALE call valid on
-the local origin chain. The harness submits that configured call with PAPI
-`txFromCallData(...).signAndSubmit(...)` and stores evidence under
-`_workspace/local-xcm/runs/<run-id>/`.
+Optional local transaction knobs:
+
+- `CARTOGRAPHER_LOCAL_CALL`: 0x-prefixed, even-length SCALE call override valid on the local origin chain.
+- `CARTOGRAPHER_LOCAL_XCM_AMOUNT`: non-negative integer amount used by the generated default call; defaults to `10000000000`.
+- `CARTOGRAPHER_LOCAL_BOOT_TIMEOUT_MS`: total `infra-up` wait budget; defaults to `120000`.
+- `CARTOGRAPHER_LOCAL_HEALTH_TIMEOUT_MS`: per-RPC health probe timeout; defaults to `5000`.
+- `CARTOGRAPHER_LOCAL_SEND_TIMEOUT_MS`: local transaction finalization timeout; defaults to `120000`.
+
+The harness submits the generated or configured call with PAPI
+`txFromCallData(...).signAndSubmit(...)`. This is a local/forked extrinsic
+submission, not a runtime API dry-run and not public network broadcast.
 
 ## Live Dry-Run Env Setup
 
@@ -175,7 +185,7 @@ The repository exposes Make targets for local terminal use and equivalent
 | --- | --- | --- |
 | Start local Chopsticks XCM infra | `make infra-up` | `pnpm run infra:up` |
 | Show local infra status and RPC health | `make infra-status` | `pnpm run infra:status` |
-| Submit configured local XCM test call | `make xcm-send` | `pnpm run xcm:send` |
+| Submit generated or configured local XCM test call | `make xcm-send` | `pnpm run xcm:send` |
 | Validate local XCM evidence | `make xcm-test` | `pnpm run xcm:test` |
 | Run built CLI against local Chopsticks | `make xcm-cli` | `pnpm run xcm:cli` |
 | Stop tracked local infra | `make infra-down` | `pnpm run infra:down` |
@@ -203,7 +213,13 @@ Check endpoints, process state, and local RPC health:
 make infra-status
 ```
 
-Submit the configured local call:
+Submit the default generated local call:
+
+```bash
+make xcm-send
+```
+
+Submit an explicit prebuilt local call instead:
 
 ```bash
 CARTOGRAPHER_LOCAL_CALL='0x...' make xcm-send
@@ -353,7 +369,7 @@ pnpm test:it
 
 The CI workflow runs on pull requests, pushes to `main`, and manual dispatch.
 
-- `quality`: Node 20.x and 22.x matrix for lint/complexity, typecheck, unit
+- `quality`: Node 22.x and 24.x matrix for lint/complexity, typecheck, unit
   tests, dependency boundaries, and build.
 - `coverage`: global 70% floor for statements, branches, functions, and lines.
 - `workflow-lint`: `actionlint` over `.github/workflows/*.yml`.

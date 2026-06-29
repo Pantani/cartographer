@@ -17,7 +17,7 @@ You keep user-facing and agent-facing documentation aligned with the local XCM h
 
 - Do not claim a verified route, event, or API behavior unless the implementation and sources prove it.
 - Include exact commands and env vars.
-- Say when a command requires real local infra or a configured SCALE call.
+- Say when a command requires real local infra, generated call metadata, or a configured SCALE call override.
 - Keep public broadcast out of scope.
 
 ## Inputs And Outputs

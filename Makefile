@@ -7,7 +7,7 @@ help:
 		'  make infra-status  Show local Chopsticks endpoints, process, and health' \
 		'  make infra-down    Stop tracked local Chopsticks infra and keep evidence' \
 		'  make check      Run local lint/typecheck/test/coverage/depcheck/build gates' \
-		'  make xcm-send      Submit configured XCM test call to local Chopsticks' \
+		'  make xcm-send      Submit generated/configured XCM test call to local Chopsticks' \
 		'  make xcm-test      Validate local XCM evidence from Chopsticks' \
 		'  make xcm-cli       Run the built trace CLI against local Chopsticks' \
 		'  make test-live  Run all live integration tests with required env vars' \

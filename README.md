@@ -106,8 +106,8 @@ topology, not public network broadcast:
 make infra-up
 make infra-status
 
-# Provide a verified SCALE call for the origin local endpoint.
-CARTOGRAPHER_LOCAL_CALL='0x...' make xcm-send
+# Generates the default local SCALE XCM call when CARTOGRAPHER_LOCAL_CALL is unset.
+make xcm-send
 
 make xcm-test
 make xcm-cli
@@ -119,9 +119,12 @@ Defaults use `infra/chopsticks/westend.yml`,
 `infra/chopsticks/westend-people.yml`, exposed at `ws://127.0.0.1:8002`,
 `ws://127.0.0.1:8000`, and `ws://127.0.0.1:8001` respectively.
 
-`xcm-send` signs and submits the configured call to the local origin fork with a
-dev signer. It refuses non-local endpoints and fails early when
-`CARTOGRAPHER_LOCAL_CALL` is missing. Runtime API dry-runs remain separate.
+`xcm-send` signs and submits a local call to the origin fork with a dev signer.
+By default it generates a `PolkadotXcm.limited_teleport_assets` call from local
+runtime metadata for the Asset Hub -> People topology and records the generated
+SCALE call in the evidence directory. `CARTOGRAPHER_LOCAL_CALL='0x...'` remains
+an explicit override for a prebuilt local call. Runtime API dry-runs remain
+separate.
 
 ## Local gates
 
@@ -158,7 +161,7 @@ inputs are missing or still set to the example placeholders. The non-`live:*`
 
 ## CI
 
-`.github/workflows/ci.yml` runs the quality gate on Node 20.x and 22.x, checks
+`.github/workflows/ci.yml` runs the quality gate on Node 22.x and 24.x, checks
 the coverage threshold, lints workflow files with `actionlint`, and rolls those
 jobs up through `CI Success`. `.github/workflows/dependency-audit.yml` runs a
 production `pnpm audit --prod --audit-level moderate` on dependency changes,

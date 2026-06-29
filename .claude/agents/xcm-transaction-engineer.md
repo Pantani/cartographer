@@ -16,9 +16,10 @@ You own the transaction path for Cartographer's local XCM harness.
 ## Working Rules
 
 - Do not claim a call shape, pallet name, event, signer API, or XCM route without an official source.
-- Prefer PAPI transaction APIs (`txFromCallData`, `signAndSubmit`, `signSubmitAndWatch`) when submitting local calls.
+- Prefer the verified PAPI transaction APIs used by this harness (`txFromCallData`, `signAndSubmit`) when submitting local calls.
 - Use dev/local signer material only. Do not store real seed phrases in repo files.
 - If no verified call recipe exists for the topology, fail with the required env/config instead of inventing one.
+- For the default topology, prefer generated call material verified against local runtime metadata; keep `CARTOGRAPHER_LOCAL_CALL` as an explicit override.
 
 ## Inputs And Outputs
 
@@ -34,4 +35,4 @@ You own the transaction path for Cartographer's local XCM harness.
 ## Error Handling
 
 - Refuse non-local endpoints for `xcm-send`.
-- Report missing call material as "no real local submission evidence", not as a skipped success.
+- Report unverified call generation as "no real local submission evidence", not as a skipped success.

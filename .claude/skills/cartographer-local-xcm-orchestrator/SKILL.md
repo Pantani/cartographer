@@ -31,9 +31,9 @@ Use parallel sub-agents for independent research or review. Use direct implement
 
 ### Phase 1: Source Verification
 
-1. Use Context7 for library docs when available.
-2. If Context7 is unavailable, use official Polkadot docs, Chopsticks repo/package source, PAPI docs, and polkadot-sdk rustdoc.
-3. Record source links in the spec or docs for every XCM, Chopsticks, PAPI, `DryRunApi`, or `XcmPaymentApi` claim.
+1. Record official primary source links in the spec or docs for every XCM, Chopsticks, PAPI, `DryRunApi`, or `XcmPaymentApi` claim.
+2. Use Context7 as a discovery aid when it is available in the current environment.
+3. If Context7 is unavailable, use official Polkadot docs, Chopsticks repo/package source, PAPI docs, and polkadot-sdk rustdoc directly.
 
 ### Phase 2: Plan And Scope
 
@@ -50,7 +50,7 @@ Use parallel sub-agents for independent research or review. Use direct implement
 2. Keep unit tests process-free and network-free.
 3. Keep local infra orchestration in scripts and config files.
 4. Preserve live dry-run commands under explicit `live:*` names when changing default `xcm:*` commands.
-5. Fail early for missing Chopsticks config, missing local call material, non-local endpoint, dead process, or failed local RPC health.
+5. Fail early for missing Chopsticks config, invalid call overrides, non-local endpoint, dead process, or failed local RPC health.
 
 ### Phase 4: QA
 
@@ -63,7 +63,7 @@ Use parallel sub-agents for independent research or review. Use direct implement
 | Situation | Required Response |
 | --- | --- |
 | Context7 unavailable | Use official primary sources and mention the Context7 failure in the spec or handoff. |
-| Missing local call | Fail `xcm-send` and explain that no local transaction was submitted. |
+| Missing local call | Generate the verified default call from local runtime metadata; fail only if generation cannot be verified. |
 | Non-local endpoint | Refuse send/test/CLI local workflow. |
 | Chopsticks process stale | Report stale state and avoid killing untracked processes. |
 | Route/event not verified | Leave a TODO or docs limitation; do not invent a fact. |
@@ -75,10 +75,10 @@ Use parallel sub-agents for independent research or review. Use direct implement
 1. User asks to update local XCM infra.
 2. Spec/ADR are updated first.
 3. Helpers are tested before implementation.
-4. Local commands start Chopsticks, submit a configured local call, validate evidence, run Cartographer CLI locally, and tear down tracked processes.
+4. Local commands start Chopsticks, submit a generated or configured local call, validate evidence, run Cartographer CLI locally, and tear down tracked processes.
 
 ### Error Flow
 
-1. User runs `make xcm-send` without `CARTOGRAPHER_LOCAL_CALL`.
+1. User runs `make xcm-send` with an invalid `CARTOGRAPHER_LOCAL_CALL`.
 2. Command fails before submission.
-3. Output states the missing env var and that no real local transaction evidence was produced.
+3. Output states that the override must be a 0x-prefixed even-length SCALE call.

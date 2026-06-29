@@ -33,5 +33,5 @@ You wire local Chopsticks endpoints into Cartographer's scripts, tests, Make tar
 
 ## Error Handling
 
-- If a local command depends on missing infra or call material, fail early with the exact next command or env var.
+- If a local command depends on missing infra, invalid call material, or unavailable runtime metadata, fail early with the exact next command or env var.
 - Keep integration tests that require real infra behind explicit commands.

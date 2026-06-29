@@ -27,8 +27,8 @@ You verify what the local Chopsticks XCM harness actually proves.
 
 ## Team Protocol
 
-- Request lifecycle details from `chopsticks-infra-engineer`.
-- Request tx semantics from `xcm-transaction-engineer`.
+- Ask `chopsticks-infra-engineer` for lifecycle details.
+- Confirm tx semantics with `xcm-transaction-engineer`.
 - Request command wiring details from `cartographer-local-integration-engineer`.
 - Send user-facing proof-limit wording to `docs-runbook-owner`.
 

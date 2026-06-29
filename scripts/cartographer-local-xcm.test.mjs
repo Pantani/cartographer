@@ -1,20 +1,28 @@
+import { EventEmitter } from "node:events";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import {
   assertLocalEndpoint,
+  assertHealthyStatus,
+  assertSuccessfulTx,
+  buildDefaultXcmTransferArgs,
   buildChopsticksArgs,
   buildCliTraceArgs,
+  checkHealth,
   buildHealthRequest,
   buildRunPaths,
   buildSendPlan,
   defaultLocalConfig,
+  deriveLocalAccountAddress,
   formatStatus,
   httpUrlFromRpc,
   isCallHex,
+  jsonStringify,
   makeLocalConfig,
   splitConfigList,
+  watchBootProcess,
 } from "./cartographer-local-xcm.mjs";
 
 const cwd = "/repo/cartographer";
@@ -109,6 +117,12 @@ describe("cartographer local XCM helpers", () => {
     );
   });
 
+  it("rejects local RPC endpoints that are not WebSocket URLs", () => {
+    expect(() => assertLocalEndpoint("origin", "http://127.0.0.1:8000")).toThrow(
+      "origin endpoint must use ws:// or wss:// for this workflow.",
+    );
+  });
+
   it("converts ws endpoints to HTTP JSON-RPC endpoints for health checks", () => {
     expect(httpUrlFromRpc("ws://127.0.0.1:8000")).toBe("http://127.0.0.1:8000/");
     expect(httpUrlFromRpc("wss://localhost:9443/path")).toBe("https://localhost:9443/path");
@@ -119,6 +133,32 @@ describe("cartographer local XCM helpers", () => {
       url: "http://127.0.0.1:8000/",
       body: { id: 1, jsonrpc: "2.0", method: "chain_getHeader", params: [] },
     });
+  });
+
+  it("bounds hanging health checks with a per-request timeout", async () => {
+    const health = await checkHealth("ws://127.0.0.1:8000", 1, (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(new Error("aborted")));
+      }),
+    );
+
+    expect(health).toEqual({ ok: false, detail: "aborted" });
+  });
+
+  it("fails local evidence validation when any RPC health check is bad", () => {
+    expect(() =>
+      assertHealthyStatus({
+        statePath: "/state/current.json",
+        pid: 123,
+        processAlive: true,
+        endpoints: defaultLocalConfig.endpoints,
+        health: {
+          origin: { ok: true, detail: "header ok" },
+          destination: { ok: false, detail: "ECONNREFUSED" },
+          relay: { ok: true, detail: "header ok" },
+        },
+      }),
+    ).toThrow("Local XCM health check failed.");
   });
 
   it("builds local send input from a configured call and running state", () => {
@@ -136,19 +176,103 @@ describe("cartographer local XCM helpers", () => {
 
     expect(plan).toEqual({
       rpcUrl: "ws://127.0.0.1:8000",
+      destinationRpcUrl: "ws://127.0.0.1:8001",
       accountUri: "//Bob",
       call: "0x0102",
+      callSource: "env",
       evidenceDir: "/runs/one",
+      amount: 10_000_000_000n,
     });
   });
 
-  it("fails send planning before any local submission when call material is absent", () => {
+  it("plans default SCALE call generation when call material is absent", () => {
+    const plan = buildSendPlan(
+      { pid: 123, endpoints: defaultLocalConfig.endpoints, evidence: { runDir: "/runs/one" } },
+      {},
+    );
+
+    expect(plan).toEqual({
+      rpcUrl: "ws://127.0.0.1:8000",
+      destinationRpcUrl: "ws://127.0.0.1:8001",
+      accountUri: "//Alice",
+      call: undefined,
+      callSource: "generated-default",
+      evidenceDir: "/runs/one",
+      amount: 10_000_000_000n,
+    });
+  });
+
+  it("uses saved local call evidence before generating another default call", () => {
+    const plan = buildSendPlan(
+      {
+        pid: 123,
+        endpoints: defaultLocalConfig.endpoints,
+        evidence: { runDir: "/runs/one", lastCall: "0x0102" },
+      },
+      {},
+    );
+
+    expect(plan.call).toBe("0x0102");
+    expect(plan.callSource).toBe("state");
+  });
+
+  it("rejects invalid local XCM amount overrides", () => {
     expect(() =>
       buildSendPlan(
         { pid: 123, endpoints: defaultLocalConfig.endpoints, evidence: { runDir: "/runs/one" } },
-        {},
+        { CARTOGRAPHER_LOCAL_XCM_AMOUNT: "1.5" },
       ),
-    ).toThrow("xcm-send requires CARTOGRAPHER_LOCAL_CALL");
+    ).toThrow("CARTOGRAPHER_LOCAL_XCM_AMOUNT must be a non-negative integer.");
+  });
+
+  it("builds default PolkadotXcm limited_teleport_assets arguments", () => {
+    const recipientPublicKey = new Uint8Array(32);
+    recipientPublicKey[0] = 212;
+
+    const args = buildDefaultXcmTransferArgs({
+      destinationParaId: 1004,
+      recipientPublicKey,
+      amount: 10_000_000_000n,
+    });
+
+    expect(args.dest.value).toEqual({
+      parents: 1,
+      interior: { type: "X1", value: { type: "Parachain", value: 1004 } },
+    });
+    expect(args.beneficiary.value.interior.value.value.id.asHex()).toBe(
+      "0xd400000000000000000000000000000000000000000000000000000000000000",
+    );
+    expect(args.assets.value[0].id).toEqual({ parents: 1, interior: { type: "Here" } });
+    expect(args.assets.value[0].fun).toEqual({ type: "Fungible", value: 10_000_000_000n });
+    expect(args.fee_asset_item).toBe(0);
+    expect(args.weight_limit).toEqual({ type: "Unlimited" });
+  });
+
+  it("serializes bigint values in evidence JSON", () => {
+    expect(jsonStringify({ amount: 10_000_000_000n })).toBe('{\n  "amount": "10000000000"\n}');
+  });
+
+  it("fails local transaction validation when finalized result is not ok", () => {
+    expect(() =>
+      assertSuccessfulTx(
+        { ok: false, dispatchError: { type: "Module", value: { pallet: "PolkadotXcm" } } },
+        "Local XCM transaction submitted to Chopsticks.",
+      ),
+    ).toThrow("dispatch error");
+  });
+
+  it("turns early Chopsticks process exit into a boot failure", async () => {
+    const child = new EventEmitter();
+    const watcher = watchBootProcess(child);
+
+    child.emit("exit", 1, null);
+
+    await expect(watcher.failure).rejects.toThrow("Chopsticks exited before local RPCs became healthy");
+    watcher.cleanup();
+  });
+
+  it("derives the local dev account SS58 address for DryRunApi origins", () => {
+    expect(deriveLocalAccountAddress("//Alice")).toBe("5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY");
   });
 
   it("builds Cartographer CLI args against the local origin endpoint and saved call", () => {
@@ -166,7 +290,7 @@ describe("cartographer local XCM helpers", () => {
       "--rpc",
       "ws://127.0.0.1:8000",
       "--origin",
-      "//Alice",
+      "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
       "--call",
       "0x0102",
       "--format",
