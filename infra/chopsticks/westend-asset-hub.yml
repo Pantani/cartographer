@@ -1,0 +1,18 @@
+# Based on the official Chopsticks westend-asset-hub.yml example:
+# https://github.com/AcalaNetwork/chopsticks/blob/master/configs/westend-asset-hub.yml
+endpoint: wss://westend-asset-hub-rpc.polkadot.io
+host: 127.0.0.1
+port: 8000
+mock-signature-host: true
+block: ${env.WESTEND_ASSET_HUB_BLOCK_NUMBER}
+db: .cartographer-local/db/westend-asset-hub.sqlite
+
+import-storage:
+  System:
+    Account:
+      -
+        -
+          - 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY
+        - providers: 1
+          data:
+            free: 1000000000000000

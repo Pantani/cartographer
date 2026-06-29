@@ -4,6 +4,17 @@ Cartographer's current Sprint-0 runnable surface is single-hop `--call` tracing.
 Raw XCM JSON input is intentionally rejected until the `dryRunXcm` client path
 and input validation are verified.
 
+## Workflow Modes
+
+| Mode | Network target | State changes | Requires signing | Public broadcast |
+| --- | --- | --- | --- | --- |
+| Runtime API dry-run | API-capable RPC endpoint | No committed chain state | No submitted transaction | No |
+| Local/forked extrinsic | Chopsticks local endpoints | Local fork state only | Local/dev signer or configured call material | No |
+| Public network broadcast | Public mainnet/testnet RPC | Public chain state if included | Real signer | Out of scope |
+
+The default `infra:*` and `xcm:*` commands use the local/forked Chopsticks mode.
+The live dry-run workflow is still available under explicit `live:*` commands.
+
 ## Install And Build
 
 ```bash
@@ -14,7 +25,40 @@ pnpm build
 The built CLI entrypoint is `dist/cli/index.js`. For a clean CI-style install,
 use `CI=true pnpm install --frozen-lockfile`.
 
-## Live Env Setup
+## Local Chopsticks Env Setup
+
+Local commands read environment variables from the shell process. `.env.example`
+is the reference list; it is not loaded automatically.
+
+Defaults:
+
+- `CARTOGRAPHER_LOCAL_RELAY_CONFIG=infra/chopsticks/westend.yml`
+- `CARTOGRAPHER_LOCAL_PARACHAIN_CONFIGS=infra/chopsticks/westend-asset-hub.yml,infra/chopsticks/westend-people.yml`
+- `CARTOGRAPHER_LOCAL_ORIGIN_RPC=ws://127.0.0.1:8000`
+- `CARTOGRAPHER_LOCAL_DEST_RPC=ws://127.0.0.1:8001`
+- `CARTOGRAPHER_LOCAL_RELAY_RPC=ws://127.0.0.1:8002`
+- `CARTOGRAPHER_LOCAL_ACCOUNT=//Alice` (local dev SURI used for signing; `xcm-cli` derives the matching SS58 account for `DryRunApi`)
+
+Default local transaction submission:
+
+- `make xcm-send` generates a SCALE-encoded `PolkadotXcm.limited_teleport_assets` call when `CARTOGRAPHER_LOCAL_CALL` is unset.
+- The destination parachain id is read from `ParachainInfo.ParachainId` on `CARTOGRAPHER_LOCAL_DEST_RPC`.
+- The call shape is encoded through the local origin runtime metadata; generation fails if the selected runtime does not expose that transaction.
+- The generated call and transaction result are stored under `_workspace/local-xcm/runs/<run-id>/`.
+
+Optional local transaction knobs:
+
+- `CARTOGRAPHER_LOCAL_CALL`: 0x-prefixed, even-length SCALE call override valid on the local origin chain.
+- `CARTOGRAPHER_LOCAL_XCM_AMOUNT`: non-negative integer amount used by the generated default call; defaults to `10000000000`.
+- `CARTOGRAPHER_LOCAL_BOOT_TIMEOUT_MS`: total `infra-up` wait budget; defaults to `120000`.
+- `CARTOGRAPHER_LOCAL_HEALTH_TIMEOUT_MS`: per-RPC health probe timeout; defaults to `5000`.
+- `CARTOGRAPHER_LOCAL_SEND_TIMEOUT_MS`: local transaction finalization timeout; defaults to `120000`.
+
+The harness submits the generated or configured call with PAPI
+`txFromCallData(...).signAndSubmit(...)`. This is a local/forked extrinsic
+submission, not a runtime API dry-run and not public network broadcast.
+
+## Live Dry-Run Env Setup
 
 Live commands read environment variables from the shell process. `.env.example`
 is the reference list; it is not loaded automatically by the CLI or tests.
@@ -25,7 +69,7 @@ Required for client-level live evidence:
 - `CARTOGRAPHER_IT_ACCOUNT`
 - `CARTOGRAPHER_IT_CALL`
 
-Required for the built CLI handoff (`pnpm run xcm:cli`):
+Required for the built live CLI handoff (`pnpm run live:xcm:cli`):
 
 - `CARTOGRAPHER_IT_RPC`
 - `CARTOGRAPHER_IT_ACCOUNT`
@@ -49,7 +93,7 @@ Required for the debug-flow proof (`pnpm test:debug-flow`):
 Optional:
 
 - `CARTOGRAPHER_IT_RESULT_XCM_VERSION` (`2`, `3`, `4`, or `5`; defaults to `4`)
-- `CARTOGRAPHER_IT_FORMAT` (`human` or `json`; defaults to `json` for `xcm:cli`)
+- `CARTOGRAPHER_IT_FORMAT` (`human` or `json`; defaults to `json` for `live:xcm:cli`)
 
 ## Run A Trace
 
@@ -139,14 +183,19 @@ The repository exposes Make targets for local terminal use and equivalent
 
 | Goal | Make target | pnpm script |
 | --- | --- | --- |
-| Install/build and prove the integration harness | `make infra-up` | `pnpm run infra:up` |
+| Start local Chopsticks XCM infra | `make infra-up` | `pnpm run infra:up` |
+| Show local infra status and RPC health | `make infra-status` | `pnpm run infra:status` |
+| Submit generated or configured local XCM test call | `make xcm-send` | `pnpm run xcm:send` |
+| Validate local XCM evidence | `make xcm-test` | `pnpm run xcm:test` |
+| Run built CLI against local Chopsticks | `make xcm-cli` | `pnpm run xcm:cli` |
+| Stop tracked local infra | `make infra-down` | `pnpm run infra:down` |
 | Run all local quality gates | `make check` | `pnpm run check` |
-| Run client-level live dry-run evidence | `make xcm-test` | `pnpm run xcm:test` |
-| Run the built CLI with live env vars | `make xcm-cli` | `pnpm run xcm:cli` |
+| Run client-level live dry-run evidence | `make live-xcm-test` | `pnpm run live:xcm:test` |
+| Run the built CLI with live env vars | `make live-xcm-cli` | `pnpm run live:xcm:cli` |
 | Run every live integration test with required env vars | `make test-live` | `pnpm run test:live` |
 | Run ESLint auto-fix | `make lint-fix` | `pnpm lint:fix` |
 
-Prepare local test infrastructure:
+Start local/forked Chopsticks XCM infrastructure:
 
 ```bash
 make infra-up
@@ -155,9 +204,29 @@ CI=true pnpm install --frozen-lockfile
 pnpm run infra:up
 ```
 
-This installs dependencies, builds the CLI, and runs the integration harness.
-Without live env vars, live cases are skipped; this proves setup, not a real
-chain dry-run.
+This installs dependencies through the Make target and starts `chopsticks xcm`
+with the default Westend relay + Asset Hub + People topology.
+
+Check endpoints, process state, and local RPC health:
+
+```bash
+make infra-status
+```
+
+Submit the default generated local call:
+
+```bash
+make xcm-send
+```
+
+Submit an explicit prebuilt local call instead:
+
+```bash
+CARTOGRAPHER_LOCAL_CALL='0x...' make xcm-send
+```
+
+This is a real extrinsic submission to the local/forked origin endpoint. It is
+not a runtime API dry-run and it is not public network broadcast.
 
 Run all local quality gates:
 
@@ -167,7 +236,7 @@ make check
 pnpm run check
 ```
 
-Run the client-level live XCM dry-run evidence test:
+Validate the local XCM evidence:
 
 ```bash
 make xcm-test
@@ -175,12 +244,37 @@ make xcm-test
 pnpm run xcm:test
 ```
 
-Run the built CLI against the live env:
+Run the built CLI against the local origin endpoint and the saved/configured call:
 
 ```bash
 make xcm-cli
 # equivalent:
 pnpm run xcm:cli
+```
+
+Stop local infra:
+
+```bash
+make infra-down
+```
+
+`infra-down` only stops the tracked process from `.cartographer-local/current.json`
+and preserves evidence under `_workspace/local-xcm/`.
+
+Run the client-level live XCM dry-run evidence test:
+
+```bash
+make live-xcm-test
+# equivalent:
+pnpm run live:xcm:test
+```
+
+Run the built CLI against the live dry-run env:
+
+```bash
+make live-xcm-cli
+# equivalent:
+pnpm run live:xcm:cli
 ```
 
 Run the full live integration suite:
@@ -191,14 +285,15 @@ make test-live
 pnpm run test:live
 ```
 
-These live commands are read-only dry-runs. They do not broadcast an extrinsic
-and they do not execute raw `--xcm` JSON. The current Sprint-0 surface accepts a
+The live commands are read-only dry-runs. They do not broadcast an extrinsic and
+they do not execute raw `--xcm` JSON. The current Sprint-0 surface accepts a
 SCALE-encoded `--call` and follows the runtime API dry-run result.
 
 `pnpm test:it` and `pnpm test:debug-flow` are permissive by design and skip live
-cases when env vars are missing. `pnpm run xcm:test`, `pnpm run xcm:cli`, and
-`pnpm run test:live` are handoff commands: they check required env vars first
-and fail fast when an input is missing or still set to an example placeholder.
+cases when env vars are missing. `pnpm run live:xcm:test`,
+`pnpm run live:xcm:cli`, and `pnpm run test:live` are live handoff commands:
+they check required env vars first and fail fast when an input is missing or
+still set to an example placeholder.
 
 ## Live Integration Inputs
 
@@ -274,7 +369,7 @@ pnpm test:it
 
 The CI workflow runs on pull requests, pushes to `main`, and manual dispatch.
 
-- `quality`: Node 20.x and 22.x matrix for lint/complexity, typecheck, unit
+- `quality`: Node 22.x and 24.x matrix for lint/complexity, typecheck, unit
   tests, dependency boundaries, and build.
 - `coverage`: global 70% floor for statements, branches, functions, and lines.
 - `workflow-lint`: `actionlint` over `.github/workflows/*.yml`.
