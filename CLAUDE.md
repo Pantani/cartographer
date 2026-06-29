@@ -92,6 +92,7 @@ reruns, updates, fixes, or result improvements, use the
 directly.
 
 **Change History:**
+
 | Date | Change | Target | Reason |
 |------|--------|--------|--------|
 | 2026-06-28 | Initial next-steps harness | `.claude/agents`, `.claude/skills`, `CLAUDE.md` | Coordinate post-Sprint-0 live verification and integration work |

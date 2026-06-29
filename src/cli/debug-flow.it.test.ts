@@ -63,6 +63,14 @@ describe.skipIf(!ready)("cartographer debug flow (live integration)", () => {
   );
 });
 
+describe("cartographer debug flow JSON parsing", () => {
+  it("rejects rendered traces without a string diagnosis status", () => {
+    const malformed = JSON.stringify({ hops: [], diagnosis: {} });
+
+    expect(() => parseRenderedTrace(malformed)).toThrow(/diagnosis\.status/);
+  });
+});
+
 interface RenderedTrace {
   readonly hops: readonly unknown[];
   readonly diagnosis: {
@@ -73,29 +81,25 @@ interface RenderedTrace {
 
 async function runTraceJson(call: string): Promise<RenderedTrace> {
   const output: string[] = [];
-  const stdout = vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array): boolean => {
+  vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array): boolean => {
     output.push(String(chunk));
     return true;
   });
 
-  try {
-    await buildProgram().parseAsync(
-      [
-        "trace",
-        "--rpc",
-        requireEnv(RPC, ENV.rpc),
-        "--origin",
-        requireEnv(ACCOUNT, ENV.account),
-        "--call",
-        call,
-        "--format",
-        "json",
-      ],
-      { from: "user" },
-    );
-  } finally {
-    stdout.mockRestore();
-  }
+  await buildProgram().parseAsync(
+    [
+      "trace",
+      "--rpc",
+      requireEnv(RPC, ENV.rpc),
+      "--origin",
+      requireEnv(ACCOUNT, ENV.account),
+      "--call",
+      call,
+      "--format",
+      "json",
+    ],
+    { from: "user" },
+  );
 
   return parseRenderedTrace(output.join(""));
 }
@@ -109,6 +113,7 @@ function parseRenderedTrace(output: string): RenderedTrace {
   const parsed = JSON.parse(output) as RenderedTrace;
   if (!Array.isArray(parsed.hops)) throw new Error("CLI JSON output did not include a hops array.");
   if (!isRecord(parsed.diagnosis)) throw new Error("CLI JSON output did not include a diagnosis object.");
+  if (typeof parsed.diagnosis.status !== "string") throw new Error("CLI JSON output diagnosis.status is not a string.");
   return parsed;
 }
 
