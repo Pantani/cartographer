@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "test": "vitest run --exclude '**/*.it.test.ts'",
+    "test:debug-flow": "vitest run src/cli/debug-flow.it.test.ts",
     "test:it": "vitest run .it.test",
     "coverage": "vitest run --coverage --exclude '**/*.it.test.ts'",
     "depcheck": "depcruise src --config .dependency-cruiser.cjs"
