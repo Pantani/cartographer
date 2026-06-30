@@ -55,12 +55,14 @@ a root cause. That gap is Cartographer.
 Pre-MVP. See [`ROADMAP.md`](./ROADMAP.md). Building the MVP (single-hop,
 readable diagnosis, fee estimate) first; V2 adds multi-hop chaining.
 
-Current Sprint-0 runnable CLI surface is single-hop `--call` tracing only. The
-`--xcm` flag is intentionally guarded and rejected until the raw-XCM
-`dryRunXcm` path, JSON input validation, and runtime API call shape are verified.
-The repo now includes a local/forked Chopsticks XCM harness, the opt-in live RPC
-dry-run harness, debug-flow proof, local Make shortcuts, a coverage gate, and CI
-workflows for quality, workflow linting, and production dependency audit.
+Current runnable CLI surface supports single-hop `--call` tracing, raw `--xcm`
+JSON tracing, and static-registry multi-hop tracing via `--registry`. The
+raw-XCM path uses `DryRunApi.dry_run_xcm` with a JSON XCM `Location` origin;
+live payload-shape TODOs remain until an API-capable chain capture verifies
+decoded PAPI event/XCM shapes. The repo includes a local/forked Chopsticks XCM
+harness, the opt-in live RPC harness, debug-flow proof, local Make shortcuts, a
+coverage gate, and CI workflows for quality, workflow linting, and production
+dependency audit.
 
 ## Architecture
 
@@ -87,11 +89,48 @@ node dist/cli/index.js trace \
   --format human
 ```
 
-Raw XCM input is planned but not runnable in Sprint 0:
+Raw XCM input uses a JSON location origin and a JSON program:
 
 ```bash
-node dist/cli/index.js trace --rpc wss://... --origin //Alice --xcm ./program.json
-# cartographer: Raw XCM input (--xcm) is not supported in this build; pass --call.
+cat > program.json <<'JSON'
+{
+  "version": 4,
+  "instructions": [
+    { "kind": "ClearOrigin" }
+  ]
+}
+JSON
+
+node dist/cli/index.js trace \
+  --rpc wss://asset-hub-polkadot-rpc.example \
+  --origin '{"parents":1,"interior":"Here"}' \
+  --xcm ./program.json \
+  --format human
+```
+
+Multi-hop tracing is enabled by passing a static registry file that maps XCM
+destinations to RPC endpoints:
+
+```bash
+cat > registry.json <<'JSON'
+{
+  "chains": [
+    {
+      "name": "Asset Hub",
+      "rpc": "wss://asset-hub-polkadot-rpc.example",
+      "location": { "parents": 1, "interior": { "X1": { "Parachain": 1000 } } }
+    }
+  ]
+}
+JSON
+
+node dist/cli/index.js trace \
+  --rpc wss://relay.example \
+  --origin //Alice \
+  --call '0x...' \
+  --registry ./registry.json \
+  --max-depth 4 \
+  --format human
 ```
 
 For the complete user workflow, output formats, coverage gate, and live
@@ -144,7 +183,9 @@ boundaries, and the production build.
 These tests hit live RPC only when real env values are supplied. A passing
 no-env run is harness proof, not live product proof. See
 [`docs/usage.md`](./docs/usage.md#live-integration-inputs) for the full env
-contract.
+contract. `pnpm run live:xcm:cli` supports call-mode by default, raw `--xcm` mode
+when `CARTOGRAPHER_IT_XCM_FILE` is set, and static registry handoff when
+`CARTOGRAPHER_IT_REGISTRY` is set.
 
 ```bash
 pnpm test:it

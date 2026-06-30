@@ -32,6 +32,29 @@ Forwarded XCM:
 "
 `;
 
+exports[`renderHuman > renders the multi-hop failure trace deterministically 1`] = `
+"Cartographer trace
+==================
+Route: Relay Chain -> Asset Hub
+Failing hop: Hop 1 @ Asset Hub
+Hop 0 @ Relay Chain
+SUCCESS — the message executed without error.
+Events:
+  (no events emitted)
+Forwarded XCM:
+  destination {"parents":1,"interior":{"X1":{"Parachain":1000}}}
+    message 0: v4 (empty)
+
+Hop 1 @ Asset Hub
+FAILURE — the message did not execute as intended.
+Root cause: The destination's entry barrier rejected the message.
+Rule: barrier-blocked
+Events:
+  PolkadotXcm.Attempted {"outcome":"Error"}
+Forwarded XCM: none
+"
+`;
+
 exports[`renderHuman > renders the success trace deterministically 1`] = `
 "Cartographer trace
 ==================
@@ -63,6 +86,28 @@ Forwarded XCM: none
 
 exports[`renderJson > renders the failure trace deterministically 1`] = `
 "{
+  "route": [
+    {
+      "index": 0,
+      "label": "Bridge Hub",
+      "chain": {
+        "rpc": "wss://bridge-hub.example",
+        "name": "Bridge Hub"
+      },
+      "status": "failure"
+    }
+  ],
+  "failingHop": {
+    "index": 0,
+    "label": "Bridge Hub",
+    "chain": {
+      "rpc": "wss://bridge-hub.example",
+      "name": "Bridge Hub"
+    },
+    "status": "failure",
+    "ruleId": "barrier-blocked",
+    "rootCause": "The destination's entry barrier rejected the message."
+  },
   "hops": [
     {
       "index": 0,
@@ -135,6 +180,18 @@ exports[`renderJson > renders the failure trace deterministically 1`] = `
 
 exports[`renderJson > renders the forwarded trace deterministically 1`] = `
 "{
+  "route": [
+    {
+      "index": 0,
+      "label": "Relay Chain",
+      "chain": {
+        "rpc": "wss://relay.example",
+        "name": "Relay Chain"
+      },
+      "status": "success"
+    }
+  ],
+  "failingHop": null,
   "hops": [
     {
       "index": 0,
@@ -207,8 +264,154 @@ exports[`renderJson > renders the forwarded trace deterministically 1`] = `
 }"
 `;
 
+exports[`renderJson > renders the multi-hop failure trace deterministically 1`] = `
+"{
+  "route": [
+    {
+      "index": 0,
+      "label": "Relay Chain",
+      "chain": {
+        "rpc": "wss://relay.example",
+        "name": "Relay Chain"
+      },
+      "status": "success"
+    },
+    {
+      "index": 1,
+      "label": "Asset Hub",
+      "chain": {
+        "rpc": "wss://asset-hub.example",
+        "name": "Asset Hub",
+        "location": {
+          "parents": 1,
+          "interior": {
+            "X1": {
+              "Parachain": 1000
+            }
+          }
+        }
+      },
+      "status": "failure"
+    }
+  ],
+  "failingHop": {
+    "index": 1,
+    "label": "Asset Hub",
+    "chain": {
+      "rpc": "wss://asset-hub.example",
+      "name": "Asset Hub",
+      "location": {
+        "parents": 1,
+        "interior": {
+          "X1": {
+            "Parachain": 1000
+          }
+        }
+      }
+    },
+    "status": "failure",
+    "ruleId": "barrier-blocked",
+    "rootCause": "The destination's entry barrier rejected the message."
+  },
+  "hops": [
+    {
+      "index": 0,
+      "chain": {
+        "rpc": "wss://relay.example",
+        "name": "Relay Chain"
+      },
+      "effects": {
+        "executionResult": {
+          "kind": "success"
+        },
+        "xcmVersion": 4,
+        "events": [],
+        "forwardedXcms": [
+          {
+            "destination": {
+              "parents": 1,
+              "interior": {
+                "X1": {
+                  "Parachain": 1000
+                }
+              }
+            },
+            "messages": [
+              {
+                "version": 4,
+                "instructions": []
+              }
+            ]
+          }
+        ]
+      },
+      "diagnosis": {
+        "status": "success"
+      }
+    },
+    {
+      "index": 1,
+      "chain": {
+        "rpc": "wss://asset-hub.example",
+        "name": "Asset Hub",
+        "location": {
+          "parents": 1,
+          "interior": {
+            "X1": {
+              "Parachain": 1000
+            }
+          }
+        }
+      },
+      "effects": {
+        "executionResult": {
+          "kind": "failure",
+          "error": {
+            "type": "Barrier",
+            "detail": "origin denied"
+          }
+        },
+        "xcmVersion": 4,
+        "events": [
+          {
+            "pallet": "PolkadotXcm",
+            "name": "Attempted",
+            "data": {
+              "outcome": "Error"
+            }
+          }
+        ],
+        "forwardedXcms": []
+      },
+      "diagnosis": {
+        "status": "failure",
+        "ruleId": "barrier-blocked",
+        "rootCause": "The destination's entry barrier rejected the message."
+      }
+    }
+  ],
+  "diagnosis": {
+    "status": "failure",
+    "ruleId": "barrier-blocked",
+    "rootCause": "The destination's entry barrier rejected the message."
+  }
+}"
+`;
+
 exports[`renderJson > renders the success trace deterministically 1`] = `
 "{
+  "route": [
+    {
+      "index": 0,
+      "label": "Asset Hub",
+      "chain": {
+        "rpc": "wss://asset-hub.example",
+        "name": "Asset Hub"
+      },
+      "status": "success"
+    }
+  ],
+  "failingHop": null,
   "hops": [
     {
       "index": 0,
@@ -291,6 +494,17 @@ exports[`renderJson > renders the success trace deterministically 1`] = `
 
 exports[`renderJson > renders the unknown trace deterministically 1`] = `
 "{
+  "route": [
+    {
+      "index": 0,
+      "label": "Parachain 2000",
+      "chain": {
+        "name": "Parachain 2000"
+      },
+      "status": "unknown"
+    }
+  ],
+  "failingHop": null,
   "hops": [
     {
       "index": 0,

@@ -6,12 +6,13 @@ export default defineConfig({
   test: {
     coverage: {
       provider: "v8",
-      include: ["src/**/*.ts"],
+      include: ["src/**/*.ts", "scripts/**/*.mjs"],
       exclude: [
         ...coverageConfigDefaults.exclude,
         "src/**/*.test.ts",
         "src/**/*.it.test.ts",
         "src/**/__fixtures__/**",
+        "scripts/**/*.test.mjs",
         // Type-only modules erase to no executable JS, so V8 cannot produce meaningful runtime coverage for them.
         "src/client/papi-shapes.ts",
         "src/types/json.ts",

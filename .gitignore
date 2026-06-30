@@ -38,6 +38,7 @@ pnpm-debug.log*
 
 # Local AI assistant state
 .claude/*
+!.claude/
 !.claude/agents/
 !.claude/agents/**
 !.claude/skills/

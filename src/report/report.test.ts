@@ -21,6 +21,7 @@ import {
 import {
   failureTrace,
   forwardedTrace,
+  multiHopFailureTrace,
   successTrace,
   unknownTrace,
 } from "./__fixtures__/traces.js";
@@ -30,6 +31,7 @@ const fixtures = [
   ["failure", failureTrace],
   ["unknown", unknownTrace],
   ["forwarded", forwardedTrace],
+  ["multi-hop failure", multiHopFailureTrace],
 ] as const;
 
 describe("renderHuman", () => {
@@ -59,6 +61,60 @@ describe("renderHuman", () => {
 
     expect(renderHuman(withRpc)).toContain("Hop 0 @ wss://relay.example");
     expect(renderHuman(unknown)).toContain("Hop 1 @ unknown chain");
+  });
+
+  it("renders every hop in a multi-hop route", () => {
+    const destination = location(1, { X1: { Parachain: 1000 } });
+    const firstHop = hop({
+      index: 0,
+      chain: chainRef({ name: "Relay Chain", rpc: "wss://relay.example" }),
+      effects: dryRunEffects({
+        executionResult: executionSuccess(),
+        xcmVersion: 4,
+        forwardedXcms: [forwardedXcm(destination, [xcmProgram(4)])],
+      }),
+      diagnosis: successDiagnosis(),
+    });
+    const secondHop = hop({
+      index: 1,
+      chain: chainRef({ name: "Asset Hub", rpc: "wss://asset-hub.example", location: destination }),
+      effects: dryRunEffects({ executionResult: executionSuccess(), xcmVersion: 4 }),
+      diagnosis: successDiagnosis(),
+    });
+    const rendered = renderHuman(traceResult({ hops: [firstHop, secondHop], diagnosis: secondHop.diagnosis }));
+
+    expect(rendered).toContain("Route: Relay Chain -> Asset Hub");
+    expect(rendered).toContain("Hop 0 @ Relay Chain");
+    expect(rendered).toContain("Hop 1 @ Asset Hub");
+    expect(rendered).toContain('destination {"parents":1,"interior":{"X1":{"Parachain":1000}}}');
+  });
+
+  it("surfaces the failing hop before the per-hop details", () => {
+    const firstHop = hop({
+      index: 0,
+      chain: chainRef({ name: "Relay Chain" }),
+      effects: dryRunEffects({ executionResult: executionSuccess(), xcmVersion: 4 }),
+      diagnosis: successDiagnosis(),
+    });
+    const secondHop = hop({
+      index: 1,
+      chain: chainRef({ name: "Asset Hub" }),
+      effects: dryRunEffects({
+        executionResult: executionFailure(executionError("Barrier", { detail: "denied" })),
+        xcmVersion: 4,
+      }),
+      diagnosis: {
+        status: "failure",
+        ruleId: "barrier-blocked",
+        rootCause: "The destination's entry barrier rejected the message.",
+      },
+    });
+    const rendered = renderHuman(traceResult({ hops: [firstHop, secondHop], diagnosis: secondHop.diagnosis }));
+
+    expect(rendered).toContain("Failing hop: Hop 1 @ Asset Hub");
+    expect(rendered.indexOf("Failing hop: Hop 1 @ Asset Hub")).toBeLessThan(
+      rendered.indexOf("Hop 0 @ Relay Chain"),
+    );
   });
 
   it("renders trace-level fees with location and unknown asset labels", () => {
@@ -116,6 +172,41 @@ describe("renderJson", () => {
     const hops = parsed["hops"] as ReadonlyArray<Record<string, unknown>>;
     const fees = hops[0]?.["fees"] as Record<string, unknown>;
     expect(fees["fee"]).toEqual({ $bigint: "12345678900" });
+  });
+
+  it("exposes route and failingHop summaries for multi-hop traces", () => {
+    const parsed = JSON.parse(renderJson(multiHopFailureTrace)) as Record<string, unknown>;
+
+    expect(parsed["route"]).toEqual([
+      {
+        index: 0,
+        label: "Relay Chain",
+        chain: { rpc: "wss://relay.example", name: "Relay Chain" },
+        status: "success",
+      },
+      {
+        index: 1,
+        label: "Asset Hub",
+        chain: {
+          rpc: "wss://asset-hub.example",
+          name: "Asset Hub",
+          location: { parents: 1, interior: { X1: { Parachain: 1000 } } },
+        },
+        status: "failure",
+      },
+    ]);
+    expect(parsed["failingHop"]).toEqual({
+      index: 1,
+      label: "Asset Hub",
+      chain: {
+        rpc: "wss://asset-hub.example",
+        name: "Asset Hub",
+        location: { parents: 1, interior: { X1: { Parachain: 1000 } } },
+      },
+      status: "failure",
+      ruleId: "barrier-blocked",
+      rootCause: "The destination's entry barrier rejected the message.",
+    });
   });
 });
 

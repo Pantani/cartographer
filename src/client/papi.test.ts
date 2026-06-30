@@ -5,6 +5,7 @@ import { accountOrigin, location, locationOrigin, xcmInstruction, xcmProgram, ty
 
 const mocks = vi.hoisted(() => ({
   dryRunCall: vi.fn(),
+  dryRunXcm: vi.fn(),
   queryAcceptablePaymentAssets: vi.fn(),
   queryWeightToAssetFee: vi.fn(),
   queryXcmWeight: vi.fn(),
@@ -36,7 +37,7 @@ const CALL = "0x1234" as HexString;
 function mockApi() {
   return {
     apis: {
-      DryRunApi: { dry_run_call: mocks.dryRunCall },
+      DryRunApi: { dry_run_call: mocks.dryRunCall, dry_run_xcm: mocks.dryRunXcm },
       XcmPaymentApi: {
         query_acceptable_payment_assets: mocks.queryAcceptablePaymentAssets,
         query_weight_to_asset_fee: mocks.queryWeightToAssetFee,
@@ -64,6 +65,7 @@ describe("openChainClient", () => {
       decodedCall: { type: "PolkadotXcm", value: { type: "limited_reserve_transfer_assets", value: {} } },
     });
     mocks.dryRunCall.mockResolvedValue(ok({ execution_result: ok({ result: "Ok" }), emitted_events: [], forwarded_xcms: [] }));
+    mocks.dryRunXcm.mockResolvedValue(ok({ execution_result: ok({ result: "Ok" }), emitted_events: [], forwarded_xcms: [] }));
   });
 
   it("opens PAPI through the websocket provider and destroys the client", () => {
@@ -115,6 +117,27 @@ describe("openChainClient", () => {
     await expect(client.dryRunCall(locationOrigin(location(0)), CALL, 4)).rejects.toThrow(/location origin/i);
 
     expect(mocks.dryRunCall).not.toHaveBeenCalled();
+  });
+
+  it("invokes DryRunApi.dry_run_xcm with a versioned location origin and versioned XCM", async () => {
+    const client = openChainClient("wss://example.test");
+    const xcm = xcmProgram(4, [xcmInstruction("ClearOrigin")]);
+
+    const effects = await client.dryRunXcm(locationOrigin(location(1, "Here")), xcm);
+
+    expect(mocks.dryRunXcm).toHaveBeenCalledWith(
+      { type: "V4", value: { parents: 1, interior: "Here" } },
+      { type: "V4", value: [{ type: "ClearOrigin" }] },
+    );
+    expect(effects.executionResult.kind).toBe("success");
+  });
+
+  it("rejects an account origin for dryRunXcm because it is not a VersionedLocation", async () => {
+    const client = openChainClient("wss://example.test");
+
+    await expect(client.dryRunXcm(accountOrigin("5Alice"), xcmProgram(4))).rejects.toThrow(/location origin/i);
+
+    expect(mocks.dryRunXcm).not.toHaveBeenCalled();
   });
 
   it("estimates execution fees using xcm weight, acceptable asset, then weight-to-asset fee", async () => {
