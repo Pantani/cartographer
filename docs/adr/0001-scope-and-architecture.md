@@ -25,11 +25,15 @@ In scope:
 - Translate effects into a human-readable diagnosis (success or root cause).
 - (V2) Follow `forwarded_xcms` across hops and produce an end-to-end trace.
 - (V3) Real-state forks via Chopsticks; route visualization; XCM "recipes".
+- Local/forked test harness commands that submit configured extrinsics only to
+  Chopsticks endpoints for evidence capture.
 
 Out of scope (explicit non-goals):
 - Re-implementing the XCVM or any execution semantics.
 - Asset-transfer SDK / dApp message composition (ParaSpell, Moonbeam own this).
-- Submitting real transactions. Cartographer is read-only / simulation-only.
+- Public network broadcast. Cartographer's product CLI remains dry-run /
+  simulation-oriented; local harness submissions are limited to forked
+  Chopsticks endpoints and must not be confused with public-chain state changes.
 
 ### Pinned runtime API surface (sources of record)
 
@@ -103,8 +107,9 @@ purity makes them unit-testable from fixtures with zero network flakiness.
   day one, so V2 is additive, not a rewrite.
 - The hard dependency on runtime-API availability is an accepted constraint;
   mitigated by targeting system chains and the Chopsticks fallback.
-- Read-only scope removes an entire class of safety concerns (no signing, no
-  fund movement) — deliberate.
+- Product read-only scope removes an entire class of public-chain safety
+  concerns. The local Chopsticks harness introduces signing only for dev/local
+  fork evidence and must fail early for non-local endpoints.
 
 ## Alternatives considered
 

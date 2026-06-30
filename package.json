@@ -9,7 +9,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm coverage && pnpm depcheck && pnpm build",
-    "infra:up": "pnpm build && pnpm test:it",
+    "infra:up": "node scripts/cartographer-local-xcm.mjs up",
+    "infra:status": "node scripts/cartographer-local-xcm.mjs status",
+    "infra:down": "node scripts/cartographer-local-xcm.mjs down",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src scripts",
     "lint:fix": "eslint src scripts --fix",
@@ -17,24 +19,31 @@
     "test:debug-flow": "vitest run src/cli/debug-flow.it.test.ts",
     "test:it": "vitest run .it.test",
     "test:live": "pnpm run live:check:full && vitest run .it.test",
+    "test:local-xcm": "vitest run scripts/cartographer-local-xcm.test.mjs",
     "coverage": "vitest run --coverage --exclude '**/*.it.test.ts'",
     "depcheck": "depcruise src --config .dependency-cruiser.cjs",
     "evidence:fixture": "node scripts/cartographer-evidence-fixture.mjs",
     "live:check:cli": "node scripts/cartographer-live.mjs check-cli",
     "live:check:client": "node scripts/cartographer-live.mjs check-client",
     "live:check:full": "node scripts/cartographer-live.mjs check-full",
-    "xcm:cli": "pnpm run live:check:cli && pnpm build && node scripts/cartographer-live.mjs run-cli",
-    "xcm:test": "pnpm run live:check:client && vitest run src/client/dry-run.it.test.ts"
+    "live:xcm:cli": "pnpm run live:check:cli && pnpm build && node scripts/cartographer-live.mjs run-cli",
+    "live:xcm:test": "pnpm run live:check:client && vitest run src/client/dry-run.it.test.ts",
+    "xcm:send": "node scripts/cartographer-local-xcm.mjs send",
+    "xcm:test": "node scripts/cartographer-local-xcm.mjs test",
+    "xcm:cli": "pnpm build && node scripts/cartographer-local-xcm.mjs cli"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "commander": "^12",
     "polkadot-api": "^1"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@acala-network/chopsticks": "1.5.0",
+    "@polkadot-labs/hdkd": "0.0.28",
+    "@polkadot-labs/hdkd-helpers": "0.0.30",
+    "@types/node": "^22",
     "@vitest/coverage-v8": "2.1.9",
     "dependency-cruiser": "^16",
     "eslint": "^9",

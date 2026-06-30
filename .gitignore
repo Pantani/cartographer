@@ -7,6 +7,7 @@ dist/
 # Local planning and agent workspace
 _workspace/
 docs/superpowers/
+.cartographer-local/
 
 # Test and coverage output
 coverage/

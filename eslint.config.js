@@ -30,13 +30,9 @@ export default tseslint.config(
   },
   {
     files: ["scripts/**/*.mjs"],
-    extends: [tseslint.configs.disableTypeChecked],
-    languageOptions: {
-      parserOptions: {
-        projectService: false,
-      },
-    },
+    ...tseslint.configs.disableTypeChecked,
     rules: {
+      ...tseslint.configs.disableTypeChecked.rules,
       "@typescript-eslint/explicit-module-boundary-types": "off",
     },
   },

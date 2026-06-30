@@ -62,7 +62,7 @@ The local all-up gate is `pnpm run check` or `make check`. It runs:
 5. `pnpm depcheck` — dependency-cruiser layering and cycle checks.
 6. `pnpm build` — production TypeScript build.
 
-CI runs the same quality chain on Node 20.x and 22.x, runs coverage as its own
+CI runs the same quality chain on Node 22.x and 24.x, runs coverage as its own
 job, lints GitHub Actions workflows with `actionlint`, and rolls those checks up
 through `CI Success`. Production dependency audit is separate:
 `.github/workflows/dependency-audit.yml` runs `pnpm audit --prod --audit-level

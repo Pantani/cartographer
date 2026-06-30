@@ -100,6 +100,24 @@ Simple questions can be answered directly.
 | 2026-06-29 | Added debug-flow integration builder | `.claude/agents`, `.claude/skills`, `CLAUDE.md` | Create a dedicated harness lane for complete debug-flow integration tests |
 | 2026-06-29 | Reconstructed persisted harness and synced Codex pointer | `.claude/agents`, `.claude/skills`, `AGENTS.md`, `CLAUDE.md` | Restore missing harness files and align Codex/Claude discovery |
 
+## Harness: Local XCM With Chopsticks
+
+**Goal:** Coordinate the local/forked Chopsticks XCM workflow for
+`infra-up/status/down`, `xcm-send/test/cli`, local evidence capture, and proof
+limits.
+
+**Trigger:** For Cartographer work involving local Chopsticks XCM infra,
+local/forked extrinsic submission, local endpoint wiring, `infra:*`,
+`xcm:send`, `xcm:test`, `xcm:cli`, reruns, updates, fixes, or result
+improvements, use the `cartographer-local-xcm-orchestrator` skill. Simple
+questions can be answered directly.
+
+**Change History:**
+
+| Date | Change | Target | Reason |
+|------|--------|--------|--------|
+| 2026-06-29 | Reconstructed local XCM harness | `.claude/agents`, `.claude/skills`, `CLAUDE.md` | Add dedicated Chopsticks local/forked XCM workflow |
+
 ## Glossary (for agents not native to Polkadot)
 - **XCM**: a program of instructions executed by the destination chain's VM.
 - **XCVM**: the virtual machine that runs XCM instructions.

@@ -52,9 +52,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20.x
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+          node-version: 22.x
 
       - name: Audit production dependency tree
         run: pnpm audit --prod --audit-level moderate
