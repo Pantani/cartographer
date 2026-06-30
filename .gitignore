@@ -37,7 +37,12 @@ pnpm-debug.log*
 .DS_Store
 
 # Local AI assistant state
-.claude/
+.claude/*
+!.claude/
+!.claude/agents/
+!.claude/agents/**
+!.claude/skills/
+!.claude/skills/**
 .codex/
 .cursor/
 .continue/

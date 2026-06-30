@@ -222,7 +222,11 @@ describe("request origins", () => {
 
 describe("runtime-empty modules", () => {
   it("loads placeholder/type-only modules without exported runtime state", async () => {
-    await expect(import("../registry/index.js").then(Object.keys)).resolves.toEqual([]);
+    await expect(import("../registry/index.js").then(Object.keys)).resolves.toEqual([
+      "locationKey",
+      "createStaticRegistry",
+      "createEndpointMetadataCache",
+    ]);
     await expect(import("./json.js").then(Object.keys)).resolves.toEqual([]);
   });
 });

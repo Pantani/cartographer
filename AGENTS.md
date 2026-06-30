@@ -79,6 +79,27 @@ pnpm test:it        # integration tests (hits live RPC; opt-in)
 pnpm depcheck       # dependency-cruiser: layering + cycles
 ```
 
+## Harness: Cartographer Next Steps
+
+**Goal:** Coordinate the post-Sprint-0 work needed to close live PAPI truth,
+real diagnostics fixtures, CLI honesty, raw XCM, multi-hop routing, route
+reporting, and final QA evidence.
+
+**Trigger:** For Cartographer next-step work involving PAPI live verification,
+dry-run corpus capture, diagnostics refinement, `--xcm`/CLI decisions,
+integration tests, full debug-flow builds, `test:debug-flow`, registry,
+multi-hop tracing, route reporting, QA acceptance, reruns, updates, fixes, or
+result improvements, use the `cartographer-next-steps-orchestrator` skill.
+Simple questions can be answered directly.
+
+**Change History:**
+
+| Date | Change | Target | Reason |
+|------|--------|--------|--------|
+| 2026-06-28 | Initial next-steps harness | `.claude/agents`, `.claude/skills`, `CLAUDE.md` | Coordinate post-Sprint-0 live verification and integration work |
+| 2026-06-29 | Added debug-flow integration builder | `.claude/agents`, `.claude/skills`, `CLAUDE.md` | Create a dedicated harness lane for complete debug-flow integration tests |
+| 2026-06-29 | Reconstructed persisted harness and synced Codex pointer | `.claude/agents`, `.claude/skills`, `AGENTS.md`, `CLAUDE.md` | Restore missing harness files and align Codex/Claude discovery |
+
 ## Glossary (for agents not native to Polkadot)
 - **XCM**: a program of instructions executed by the destination chain's VM.
 - **XCVM**: the virtual machine that runs XCM instructions.

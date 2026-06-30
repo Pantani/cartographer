@@ -12,11 +12,21 @@ import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat";
 
 import type { DryRunEffects, FeeEstimate, HexString, Origin, XcmProgram, XcmVersion } from "../types/index.js";
 import { normalizeEffects, normalizeFees } from "./normalize.js";
-import type { PapiCallDryRunEffects, PapiEnum, PapiFeePayload, PapiVersionedAssetId, PapiVersionedXcm, PapiWeight } from "./papi-shapes.js";
+import type {
+  PapiCallDryRunEffects,
+  PapiEnum,
+  PapiFeePayload,
+  PapiVersionedAssetId,
+  PapiVersionedLocation,
+  PapiVersionedXcm,
+  PapiWeight,
+  PapiXcmDryRunEffects,
+} from "./papi-shapes.js";
 
 /** A connected chain client, scoped to one RPC endpoint. Close it with `disconnect`. */
 export interface ChainClient {
   readonly dryRunCall: (origin: Origin, call: HexString, resultXcmVersion: XcmVersion) => Promise<DryRunEffects>;
+  readonly dryRunXcm: (origin: Origin, xcm: XcmProgram) => Promise<DryRunEffects>;
   readonly estimateFees: (xcm: XcmProgram) => Promise<FeeEstimate>;
   readonly disconnect: () => void;
 }
@@ -41,6 +51,7 @@ interface UnsafeApi {
   readonly apis: {
     readonly DryRunApi: {
       readonly dry_run_call: (...args: unknown[]) => Promise<unknown>;
+      readonly dry_run_xcm: (...args: unknown[]) => Promise<unknown>;
     };
     readonly XcmPaymentApi: {
       readonly query_acceptable_payment_assets: (...args: unknown[]) => Promise<unknown>;
@@ -78,6 +89,20 @@ async function callDryRunCall(
 }
 
 /**
+ * Invoke `DryRunApi.dry_run_xcm` and return its decoded payload. The runtime API
+ * takes a `VersionedLocation` origin and a `VersionedXcm<Call>`.
+ * Source: https://paritytech.github.io/polkadot-sdk/master/xcm_runtime_apis/dry_run/trait.DryRunApi.html
+ */
+async function callDryRunXcm(
+  api: UnsafeApi,
+  origin: Origin,
+  xcm: XcmProgram,
+): Promise<PapiXcmDryRunEffects> {
+  const raw = await api.apis.DryRunApi.dry_run_xcm(locationOriginToArg(origin, xcm.version), xcmToPapiVersionedXcm(xcm));
+  return unwrapRuntimeResult(raw, "DryRunApi.dry_run_xcm") as PapiXcmDryRunEffects;
+}
+
+/**
  * The runtime API returns `Result<CallDryRunEffects, Error>`. Outer transport errors
  * (API unimplemented on the chain) surface as a thrown rejection; an `Err` from the call
  * itself surfaces as `success: false`. We treat the latter as a hard failure of the
@@ -111,11 +136,24 @@ function stringifyUnknown(value: unknown): string {
 /**
  * Map a domain `Origin` to the runtime-API origin argument.
  * Invariant: `dry_run_call` accepts `OriginCaller`, not an XCM `Location`; location
- * origins belong to `dry_run_xcm`, which is outside S0-T3.
+ * origins belong to `dry_run_xcm`.
  */
 function originToArg(origin: Origin): unknown {
   if (origin.kind === "account") return Enum("system", Enum("Signed", origin.account));
   throw new Error("Location origin is not valid for dryRunCall; use DryRunApi.dry_run_xcm for XCM location origins.");
+}
+
+/**
+ * Map a domain location origin to a PAPI `VersionedLocation`.
+ * TODO(verify): confirm whether the origin location version must always match
+ * the raw XCM program version on target runtimes; current encoding keeps them
+ * aligned to avoid a mixed-version request.
+ */
+function locationOriginToArg(origin: Origin, version: XcmVersion): PapiVersionedLocation {
+  if (origin.kind !== "location") {
+    throw new Error("Account origin is not valid for dryRunXcm; use a JSON XCM location origin.");
+  }
+  return { type: xcmVersionTag(version), value: origin.location };
 }
 
 /**
@@ -185,6 +223,8 @@ export function openChainClient(rpcUrl: string): ChainClient {
   return {
     dryRunCall: async (origin, call, resultXcmVersion) =>
       normalizeEffects(await callDryRunCall(api, origin, call, resultXcmVersion), resultXcmVersion),
+    dryRunXcm: async (origin, xcm) =>
+      normalizeEffects(await callDryRunXcm(api, origin, xcm), xcm.version),
     estimateFees: async (xcm) => normalizeFees(await callXcmPayment(api, xcm)),
     disconnect: () => {
       client.destroy();

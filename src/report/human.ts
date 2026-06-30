@@ -40,7 +40,7 @@ function traceFeeLines(result: TraceResult): readonly string[] {
 }
 
 /**
- * Render a single-hop `TraceResult` to readable text (S0-T5).
+ * Render a `TraceResult` to readable text (S0-T5).
  * Pure and deterministic: no `Date`, no locale formatting. Surfaces raw effects
  * on `unknown` status (ADR-0003) and never throws on missing optional fields.
  */

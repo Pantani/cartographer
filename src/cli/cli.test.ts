@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const pipeline = vi.hoisted(() => ({
   trace: vi.fn(),
@@ -10,6 +13,8 @@ vi.mock("../report/index.js", () => ({ render: pipeline.render }));
 
 import { buildProgram, runCli } from "./command.js";
 import type { TraceRequest, TraceResult } from "../types/index.js";
+
+const tmpDirs: string[] = [];
 
 /** Parse user-level args (no node/script prefix) through a program with an injected runner. */
 async function run(
@@ -40,6 +45,18 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+afterEach(async () => {
+  await Promise.all(tmpDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+async function writeTempJson(value: unknown): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "cartographer-xcm-"));
+  tmpDirs.push(dir);
+  const file = join(dir, "program.json");
+  await writeFile(file, JSON.stringify(value), "utf8");
+  return file;
+}
 
 describe("cartographer trace — request building", () => {
   it("builds a TraceRequest from flags and prints the rendered output", async () => {
@@ -113,10 +130,40 @@ describe("cartographer trace — validation", () => {
     ).rejects.toThrow(/exactly one of --call or --xcm/);
   });
 
-  it("rejects the unsupported --xcm path", async () => {
+  it("builds a raw-XCM TraceRequest from a JSON file and JSON location origin", async () => {
+    const file = await writeTempJson({
+      version: 4,
+      instructions: [{ kind: "ClearOrigin" }, { kind: "BuyExecution", args: { fees: "DOT" } }],
+    });
+    let captured: TraceRequest | undefined;
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+
+    await run(
+      ["trace", "--rpc", "wss://x", "--origin", "{\"parents\":1,\"interior\":\"Here\"}", "--xcm", file],
+      (request) => {
+        captured = request;
+        return Promise.resolve("RAW");
+      },
+    );
+
+    expect(captured).toEqual({
+      rpc: "wss://x",
+      origin: { kind: "location", location: { parents: 1, interior: "Here" } },
+      resultXcmVersion: 4,
+      format: "human",
+      xcm: {
+        version: 4,
+        instructions: [{ kind: "ClearOrigin" }, { kind: "BuyExecution", args: { fees: "DOT" } }],
+      },
+    });
+  });
+
+  it("rejects invalid raw-XCM JSON input", async () => {
+    const file = await writeTempJson({ version: 4, instructions: [{ args: {} }] });
+
     await expect(
-      run(["trace", "--rpc", "wss://x", "--origin", "//Alice", "--xcm", "p.json"], noop),
-    ).rejects.toThrow(/not supported/i);
+      run(["trace", "--rpc", "wss://x", "--origin", "{\"parents\":1,\"interior\":\"Here\"}", "--xcm", file], noop),
+    ).rejects.toThrow(/instruction kind/i);
   });
 
   it("rejects a non-hex --call", async () => {

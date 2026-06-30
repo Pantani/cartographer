@@ -61,6 +61,31 @@ describe("renderHuman", () => {
     expect(renderHuman(unknown)).toContain("Hop 1 @ unknown chain");
   });
 
+  it("renders every hop in a multi-hop route", () => {
+    const destination = location(1, { X1: { Parachain: 1000 } });
+    const firstHop = hop({
+      index: 0,
+      chain: chainRef({ name: "Relay Chain", rpc: "wss://relay.example" }),
+      effects: dryRunEffects({
+        executionResult: executionSuccess(),
+        xcmVersion: 4,
+        forwardedXcms: [forwardedXcm(destination, [xcmProgram(4)])],
+      }),
+      diagnosis: successDiagnosis(),
+    });
+    const secondHop = hop({
+      index: 1,
+      chain: chainRef({ name: "Asset Hub", rpc: "wss://asset-hub.example", location: destination }),
+      effects: dryRunEffects({ executionResult: executionSuccess(), xcmVersion: 4 }),
+      diagnosis: successDiagnosis(),
+    });
+    const rendered = renderHuman(traceResult({ hops: [firstHop, secondHop], diagnosis: secondHop.diagnosis }));
+
+    expect(rendered).toContain("Hop 0 @ Relay Chain");
+    expect(rendered).toContain("Hop 1 @ Asset Hub");
+    expect(rendered).toContain('destination {"parents":1,"interior":{"X1":{"Parachain":1000}}}');
+  });
+
   it("renders trace-level fees with location and unknown asset labels", () => {
     const effects = dryRunEffects({ executionResult: executionSuccess(), xcmVersion: 4 });
     const baseHop = hop({ index: 0, chain: chainRef({ name: "Relay" }), effects, diagnosis: successDiagnosis() });

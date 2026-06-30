@@ -1,8 +1,9 @@
 # Usage
 
-Cartographer's current Sprint-0 runnable surface is single-hop `--call` tracing.
-Raw XCM JSON input is intentionally rejected until the `dryRunXcm` client path
-and input validation are verified.
+Cartographer's current Sprint-0 runnable surface supports single-hop `--call`
+tracing and raw `--xcm` JSON tracing. Existing live handoff scripts still focus
+on `--call`; raw-XCM live proof needs dedicated env/file inputs before it can be
+claimed as product evidence.
 
 ## Install And Build
 
@@ -74,20 +75,29 @@ node dist/cli/index.js trace \
   --format json
 ```
 
-`--xcm` is parsed but not supported in this build:
+Raw XCM JSON input is available with `--xcm`. For this path, `--origin` must be
+a JSON XCM `Location`, not an account:
 
 ```bash
+cat > program.json <<'JSON'
+{
+  "version": 4,
+  "instructions": [
+    { "kind": "ClearOrigin" },
+    { "kind": "BuyExecution", "args": { "fees": "DOT" } }
+  ]
+}
+JSON
+
 node dist/cli/index.js trace \
   --rpc wss://asset-hub-polkadot-rpc.example \
-  --origin 5... \
-  --xcm ./program.json
+  --origin '{"parents":1,"interior":"Here"}' \
+  --xcm ./program.json \
+  --format json
 ```
 
-Expected result:
-
-```text
-cartographer: Raw XCM input (--xcm) is not supported in this build; pass --call.
-```
+The raw JSON shape is Cartographer's domain model: `version` is `2`, `3`, `4`,
+or `5`; `instructions` is an array of `{ "kind": string, "args"?: JSON }`.
 
 ## Test And Coverage Commands
 
@@ -191,9 +201,10 @@ make test-live
 pnpm run test:live
 ```
 
-These live commands are read-only dry-runs. They do not broadcast an extrinsic
-and they do not execute raw `--xcm` JSON. The current Sprint-0 surface accepts a
-SCALE-encoded `--call` and follows the runtime API dry-run result.
+These live commands are read-only dry-runs. They do not broadcast an extrinsic.
+The current live handoff commands exercise SCALE-encoded `--call` input; they do
+not yet provide dedicated raw `--xcm` JSON env/file inputs. Do not treat passing
+`xcm:*` scripts as raw-XCM live proof until that contract exists.
 
 `pnpm test:it` and `pnpm test:debug-flow` are permissive by design and skip live
 cases when env vars are missing. `pnpm run xcm:test`, `pnpm run xcm:cli`, and

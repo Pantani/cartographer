@@ -99,6 +99,20 @@ export interface PapiCallDryRunEffects {
 }
 
 /**
+ * Decoded `XcmDryRunEffects<Event>` (ADR-0001). Unlike `CallDryRunEffects`, this
+ * shape has no `local_xcm`; source:
+ * polkadot-sdk `xcm_runtime_apis::dry_run::XcmDryRunEffects`.
+ */
+export interface PapiXcmDryRunEffects {
+  readonly execution_result: PapiResult;
+  readonly emitted_events: readonly PapiEventEntry[];
+  readonly forwarded_xcms: readonly (readonly [
+    PapiVersionedLocation,
+    readonly PapiVersionedXcm[],
+  ])[];
+}
+
+/**
  * Decoded fee shape assembled from `XcmPaymentApi.query_xcm_weight`,
  * `query_acceptable_payment_assets`, and `query_weight_to_asset_fee`.
  * Source: polkadot-sdk `xcm_runtime_apis::fees::XcmPaymentApi`.

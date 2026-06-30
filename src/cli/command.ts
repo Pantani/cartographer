@@ -2,10 +2,19 @@
 // drives the orchestrator, and renders the result. Nothing imports this module.
 
 import { Command } from "commander";
+import { readFile } from "node:fs/promises";
 import { trace } from "../orchestrator/index.js";
 import { render } from "../report/index.js";
-import { accountOrigin } from "../types/index.js";
-import type { HexString, OutputFormat, TraceRequest, XcmVersion } from "../types/index.js";
+import { accountOrigin, location, locationOrigin, xcmInstruction, xcmProgram } from "../types/index.js";
+import type {
+  HexString,
+  NormalizedValue,
+  OutputFormat,
+  TraceRequest,
+  XcmInstruction,
+  XcmProgram,
+  XcmVersion,
+} from "../types/index.js";
 
 // TODO(verify: default result XCM version per target chain — pin once descriptors are
 // generated (ADR-0002). v4 is a reasonable current default for system chains.)
@@ -13,7 +22,7 @@ const DEFAULT_XCM_VERSION: XcmVersion = 4;
 const CALL_HEX_PATTERN = /^0x(?:[0-9a-fA-F]{2})+$/;
 
 /** The raw `--flag` values commander collects for the `trace` subcommand. */
-interface TraceFlags {
+interface TraceFlagValues {
   readonly rpc: string;
   readonly origin: string;
   readonly call?: string;
@@ -40,10 +49,10 @@ export function buildProgram(run: TraceRunner = defaultRunner): Command {
     .requiredOption("--rpc <url>", "WebSocket RPC endpoint of the origin chain")
     .requiredOption("--origin <caller>", "origin caller (SS58 address or dev seed, e.g. //Alice)")
     .option("--call <hex>", "SCALE-encoded call to dry-run (0x-prefixed)")
-    .option("--xcm <path>", "planned raw XCM program JSON input (currently unsupported)")
+    .option("--xcm <path>", "raw XCM program JSON input")
     .option("--format <format>", "output format: human | json", "human")
     .action(async (raw: unknown) => {
-      const out = await run(toRequest(parseFlags(raw)));
+      const out = await run(await toRequest(parseFlags(raw)));
       process.stdout.write(`${out}\n`);
     });
   program.exitOverride();
@@ -56,7 +65,7 @@ export async function runCli(argv: readonly string[]): Promise<void> {
 }
 
 /** Narrow commander's option bag (typed as a loose record) into our typed flags. */
-function parseFlags(raw: unknown): TraceFlags {
+function parseFlags(raw: unknown): TraceFlagValues {
   /* v8 ignore next -- Commander action handlers provide an option object; this guards malformed internal calls. */
   if (typeof raw !== "object" || raw === null) throw new Error("Invalid CLI options.");
   const bag = raw as Record<string, unknown>;
@@ -81,26 +90,32 @@ function optionalString(bag: Record<string, unknown>, key: string): string | und
 }
 
 /** Build a validated TraceRequest. Exactly one of --call | --xcm is required. */
-function toRequest(flags: TraceFlags): TraceRequest {
+async function toRequest(flags: TraceFlagValues): Promise<TraceRequest> {
   if (flags.call !== undefined && flags.xcm !== undefined) {
     throw new Error("Provide exactly one of --call or --xcm.");
   }
   if (flags.call !== undefined) return callRequest(flags, flags.call);
-  if (flags.xcm !== undefined) {
-    // TODO(verify: raw-XCM input needs a JSON→XcmProgram parser/validator and client.dryRunXcm;
-    // neither exists in Sprint 0. Enable once both land.)
-    throw new Error("Raw XCM input (--xcm) is not supported in this build; pass --call.");
-  }
+  if (flags.xcm !== undefined) return xcmRequest(flags, await readXcmProgram(flags.xcm));
   throw new Error("Provide exactly one of --call or --xcm.");
 }
 
-function callRequest(flags: TraceFlags, call: string): TraceRequest {
+function callRequest(flags: TraceFlagValues, call: string): TraceRequest {
   return {
     rpc: flags.rpc,
     origin: accountOrigin(flags.origin),
     resultXcmVersion: DEFAULT_XCM_VERSION,
     format: parseFormat(flags.format),
     call: asHex(call),
+  };
+}
+
+function xcmRequest(flags: TraceFlagValues, xcm: XcmProgram): TraceRequest {
+  return {
+    rpc: flags.rpc,
+    origin: parseLocationOrigin(flags.origin),
+    resultXcmVersion: DEFAULT_XCM_VERSION,
+    format: parseFormat(flags.format),
+    xcm,
   };
 }
 
@@ -114,4 +129,69 @@ function asHex(value: string): HexString {
     throw new Error("--call must be a 0x-prefixed, even-length SCALE hex string.");
   }
   return value as HexString;
+}
+
+async function readXcmProgram(path: string): Promise<XcmProgram> {
+  return parseXcmProgram(JSON.parse(await readFile(path, "utf8")));
+}
+
+function parseXcmProgram(value: unknown): XcmProgram {
+  const input = record(value, "raw XCM input");
+  const version = parseXcmVersion(input["version"]);
+  const rawInstructions = array(input["instructions"], "raw XCM instructions");
+  return xcmProgram(version, rawInstructions.map(parseXcmInstruction));
+}
+
+function parseXcmInstruction(value: unknown): XcmInstruction {
+  const input = record(value, "raw XCM instruction");
+  const kind = input["kind"];
+  if (typeof kind !== "string" || kind.length === 0) {
+    throw new Error("Raw XCM instruction kind must be a non-empty string.");
+  }
+  return xcmInstruction(kind, input["args"] === undefined ? undefined : normalized(input["args"], "instruction args"));
+}
+
+function parseLocationOrigin(value: string): ReturnType<typeof locationOrigin> {
+  const input = record(JSON.parse(value), "--origin location");
+  const parents = input["parents"];
+  if (typeof parents !== "number" || !Number.isInteger(parents) || parents < 0) {
+    throw new Error("--origin JSON location parents must be a non-negative integer.");
+  }
+  return locationOrigin(location(parents, normalized(input["interior"] ?? "Here", "location interior")));
+}
+
+function parseXcmVersion(value: unknown): XcmVersion {
+  if (value === 2 || value === 3 || value === 4 || value === 5) return value;
+  throw new Error("Raw XCM version must be one of 2, 3, 4, or 5.");
+}
+
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  throw new Error(`${label} must be a JSON object.`);
+}
+
+function array(value: unknown, label: string): readonly unknown[] {
+  if (Array.isArray(value)) return value;
+  throw new Error(`${label} must be an array.`);
+}
+
+function normalized(value: unknown, label: string): NormalizedValue {
+  if (value === null) return null;
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+      return value;
+  }
+  if (Array.isArray(value)) return value.map((item) => normalized(item, label));
+  if (typeof value === "object") return normalizeRecord(value as Record<string, unknown>, label);
+  throw new Error(`${label} contains a value unsupported by JSON.`);
+}
+
+function normalizeRecord(value: Record<string, unknown>, label: string): NormalizedValue {
+  const out: Record<string, NormalizedValue> = {};
+  for (const [key, item] of Object.entries(value)) {
+    out[key] = normalized(item, label);
+  }
+  return out;
 }
