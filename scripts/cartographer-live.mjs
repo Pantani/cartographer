@@ -5,6 +5,7 @@ export const clientEnvNames = ["CARTOGRAPHER_IT_RPC", "CARTOGRAPHER_IT_ACCOUNT",
 export const fullEnvNames = [...clientEnvNames, "CARTOGRAPHER_IT_CALL_OK", "CARTOGRAPHER_IT_CALL_FAIL"];
 
 const cliEnvNames = ["CARTOGRAPHER_IT_RPC", "CARTOGRAPHER_IT_ACCOUNT"];
+const rawXcmCliEnvNames = ["CARTOGRAPHER_IT_RPC", "CARTOGRAPHER_IT_XCM_ORIGIN", "CARTOGRAPHER_IT_XCM_FILE"];
 const callEnvNames = new Set(["CARTOGRAPHER_IT_CALL", "CARTOGRAPHER_IT_CALL_OK", "CARTOGRAPHER_IT_CALL_FAIL"]);
 const callHexPattern = /^0x(?:[0-9a-fA-F]{2})+$/;
 const placeholderValues = new Map([
@@ -14,6 +15,13 @@ const placeholderValues = new Map([
   ["CARTOGRAPHER_IT_CALL_OK", "0x..."],
   ["CARTOGRAPHER_IT_CALL_FAIL", "0x..."],
 ]);
+const defaultRuntime = {
+  env: process.env,
+  error: (message) => console.error(message),
+  exit: (code) => process.exit(code),
+  spawnSync,
+  execPath: process.execPath,
+};
 
 /** Finds required env vars that are absent or still set to example placeholders. */
 export function findMissingEnv(names, env = process.env) {
@@ -28,6 +36,11 @@ export function formatMissingEnvMessage(commandName, missing) {
 
 /** Builds the live CLI argv from validated env values. */
 export function buildTraceArgs(env = process.env) {
+  if (isConfigured(env.CARTOGRAPHER_IT_XCM_FILE)) return buildRawXcmTraceArgs(env);
+  return buildCallTraceArgs(env);
+}
+
+function buildCallTraceArgs(env) {
   const missing = findMissingEnv(cliEnvNames, env);
   const call = firstUsableCallValue(env.CARTOGRAPHER_IT_CALL_OK, env.CARTOGRAPHER_IT_CALL);
   if (!isUsableCallValue(call)) missing.push("CARTOGRAPHER_IT_CALL_OK or CARTOGRAPHER_IT_CALL");
@@ -42,15 +55,55 @@ export function buildTraceArgs(env = process.env) {
     env.CARTOGRAPHER_IT_ACCOUNT,
     "--call",
     call,
+    ...optionalTraceArgs(env),
     "--format",
     env.CARTOGRAPHER_IT_FORMAT || "json",
   ];
+}
+
+function buildRawXcmTraceArgs(env) {
+  const missing = findMissingEnv(rawXcmCliEnvNames, env);
+  if (missing.length > 0) throw new Error(formatMissingEnvMessage("xcm:cli", missing));
+
+  return [
+    "dist/cli/index.js",
+    "trace",
+    "--rpc",
+    env.CARTOGRAPHER_IT_RPC,
+    "--origin",
+    env.CARTOGRAPHER_IT_XCM_ORIGIN,
+    "--xcm",
+    env.CARTOGRAPHER_IT_XCM_FILE,
+    ...optionalTraceArgs(env),
+    "--format",
+    env.CARTOGRAPHER_IT_FORMAT || "json",
+  ];
+}
+
+function optionalTraceArgs(env) {
+  return [...registryArgs(env), ...maxDepthArgs(env)];
+}
+
+function registryArgs(env) {
+  return isConfigured(env.CARTOGRAPHER_IT_REGISTRY) ? ["--registry", env.CARTOGRAPHER_IT_REGISTRY] : [];
+}
+
+function maxDepthArgs(env) {
+  if (!isConfigured(env.CARTOGRAPHER_IT_MAX_DEPTH)) return [];
+  if (!/^[1-9]\d*$/.test(env.CARTOGRAPHER_IT_MAX_DEPTH)) {
+    throw new Error("CARTOGRAPHER_IT_MAX_DEPTH must be a positive integer.");
+  }
+  return ["--max-depth", env.CARTOGRAPHER_IT_MAX_DEPTH];
 }
 
 function isUsableEnvValue(name, value) {
   if (typeof value !== "string" || value.trim() === "" || value === placeholderValues.get(name)) return false;
   if (callEnvNames.has(name)) return isUsableCallValue(value);
   return true;
+}
+
+function isConfigured(value) {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 function isUsableCallValue(value) {
@@ -61,52 +114,55 @@ function firstUsableCallValue(...values) {
   return values.find(isUsableCallValue);
 }
 
-function checkEnv(commandName, names) {
-  const missing = findMissingEnv(names);
+function checkEnv(commandName, names, runtime) {
+  const missing = findMissingEnv(names, runtime.env);
   if (missing.length === 0) return;
-  console.error(formatMissingEnvMessage(commandName, missing));
-  process.exit(1);
+  runtime.error(formatMissingEnvMessage(commandName, missing));
+  runtime.exit(1);
 }
 
-function checkCliEnv() {
+function checkCliEnv(runtime) {
   try {
-    buildTraceArgs();
+    buildTraceArgs(runtime.env);
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
+    runtime.error(error instanceof Error ? error.message : String(error));
+    runtime.exit(1);
   }
 }
 
-function runCli() {
+function runCli(runtime) {
+  let status;
   try {
-    const result = spawnSync(process.execPath, buildTraceArgs(), { stdio: "inherit" });
-    process.exit(result.status ?? 1);
+    const result = runtime.spawnSync(runtime.execPath, buildTraceArgs(runtime.env), { stdio: "inherit" });
+    status = result.status ?? 1;
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
+    runtime.error(error instanceof Error ? error.message : String(error));
+    runtime.exit(1);
+    return;
   }
+  runtime.exit(status);
 }
 
-function main(argv) {
+export function main(argv, runtime = defaultRuntime) {
   const command = argv[2];
   if (command === "check-cli") {
-    checkCliEnv();
+    checkCliEnv(runtime);
     return;
   }
   if (command === "check-client") {
-    checkEnv("xcm:test", clientEnvNames);
+    checkEnv("xcm:test", clientEnvNames, runtime);
     return;
   }
   if (command === "check-full") {
-    checkEnv("test:live", fullEnvNames);
+    checkEnv("test:live", fullEnvNames, runtime);
     return;
   }
   if (command === "run-cli") {
-    runCli();
+    runCli(runtime);
     return;
   }
-  console.error("Usage: node scripts/cartographer-live.mjs check-cli|check-client|check-full|run-cli");
-  process.exit(1);
+  runtime.error("Usage: node scripts/cartographer-live.mjs check-cli|check-client|check-full|run-cli");
+  runtime.exit(1);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

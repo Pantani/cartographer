@@ -21,6 +21,12 @@ describe("registry", () => {
     expect(locationKey(location(0, "Here"))).toBe('{"parents":0,"interior":"Here"}');
   });
 
+  it("builds a stable location key when junction data contains bigint", () => {
+    expect(locationKey(location(1, { X1: { Parachain: 2000n } }))).toBe(
+      '{"parents":1,"interior":{"X1":{"Parachain":{"$bigint":"2000"}}}}',
+    );
+  });
+
   it("caches endpoint metadata per RPC URL", async () => {
     const cache = createEndpointMetadataCache<string>();
     const load = vi.fn(() => Promise.resolve("metadata"));

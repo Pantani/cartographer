@@ -3,11 +3,15 @@
 
 import { Command } from "commander";
 import { readFile } from "node:fs/promises";
+import { createStaticRegistry } from "../registry/index.js";
+import type { ChainEndpoint } from "../registry/index.js";
 import { trace } from "../orchestrator/index.js";
+import type { TraceDeps } from "../orchestrator/index.js";
 import { render } from "../report/index.js";
 import { accountOrigin, location, locationOrigin, xcmInstruction, xcmProgram } from "../types/index.js";
 import type {
   HexString,
+  Location,
   NormalizedValue,
   OutputFormat,
   TraceRequest,
@@ -27,13 +31,21 @@ interface TraceFlagValues {
   readonly origin: string;
   readonly call?: string;
   readonly xcm?: string;
+  readonly registry?: string;
+  readonly maxDepth?: string;
   readonly format: string;
 }
 
-/** Runs a parsed request to its rendered string. Injectable so the command is testable. */
-export type TraceRunner = (request: TraceRequest) => Promise<string>;
+interface TraceInvocation {
+  readonly request: TraceRequest;
+  readonly deps?: TraceDeps;
+}
 
-const defaultRunner: TraceRunner = async (request) => render(await trace(request), request.format);
+/** Runs a parsed request to its rendered string. Injectable so the command is testable. */
+export type TraceRunner = (request: TraceRequest, deps?: TraceDeps) => Promise<string>;
+
+const defaultRunner: TraceRunner = async (request, deps) =>
+  render(deps === undefined ? await trace(request) : await trace(request, deps), request.format);
 
 /**
  * Build the `cartographer` program. `run` is injected (defaults to the real pipeline) so
@@ -50,9 +62,12 @@ export function buildProgram(run: TraceRunner = defaultRunner): Command {
     .requiredOption("--origin <caller>", "origin caller (SS58 address or dev seed, e.g. //Alice)")
     .option("--call <hex>", "SCALE-encoded call to dry-run (0x-prefixed)")
     .option("--xcm <path>", "raw XCM program JSON input")
+    .option("--registry <path>", "static route registry JSON input for multi-hop tracing")
+    .option("--max-depth <count>", "maximum total hops to follow when using a registry")
     .option("--format <format>", "output format: human | json", "human")
     .action(async (raw: unknown) => {
-      const out = await run(await toRequest(parseFlags(raw)));
+      const invocation = await toInvocation(parseFlags(raw));
+      const out = await run(invocation.request, invocation.deps);
       process.stdout.write(`${out}\n`);
     });
   program.exitOverride();
@@ -75,6 +90,8 @@ function parseFlags(raw: unknown): TraceFlagValues {
     format: optionalString(bag, "format") ?? "human",
     ...(typeof bag["call"] === "string" ? { call: bag["call"] } : {}),
     ...(typeof bag["xcm"] === "string" ? { xcm: bag["xcm"] } : {}),
+    ...(typeof bag["registry"] === "string" ? { registry: bag["registry"] } : {}),
+    ...(typeof bag["maxDepth"] === "string" ? { maxDepth: bag["maxDepth"] } : {}),
   };
 }
 
@@ -89,6 +106,13 @@ function optionalString(bag: Record<string, unknown>, key: string): string | und
   return typeof value === "string" ? value : undefined;
 }
 
+/** Build a validated trace invocation. Exactly one of --call | --xcm is required. */
+async function toInvocation(flags: TraceFlagValues): Promise<TraceInvocation> {
+  const request = await toRequest(flags);
+  const deps = await toTraceDeps(flags);
+  return { request, ...(deps ? { deps } : {}) };
+}
+
 /** Build a validated TraceRequest. Exactly one of --call | --xcm is required. */
 async function toRequest(flags: TraceFlagValues): Promise<TraceRequest> {
   if (flags.call !== undefined && flags.xcm !== undefined) {
@@ -97,6 +121,16 @@ async function toRequest(flags: TraceFlagValues): Promise<TraceRequest> {
   if (flags.call !== undefined) return callRequest(flags, flags.call);
   if (flags.xcm !== undefined) return xcmRequest(flags, await readXcmProgram(flags.xcm));
   throw new Error("Provide exactly one of --call or --xcm.");
+}
+
+async function toTraceDeps(flags: TraceFlagValues): Promise<TraceDeps | undefined> {
+  const registry = flags.registry !== undefined ? await readRegistry(flags.registry) : undefined;
+  const maxDepth = parseMaxDepth(flags.maxDepth);
+  if (registry === undefined && maxDepth === undefined) return undefined;
+  return {
+    ...(registry !== undefined ? { registry } : {}),
+    ...(maxDepth !== undefined ? { maxDepth } : {}),
+  };
 }
 
 function callRequest(flags: TraceFlagValues, call: string): TraceRequest {
@@ -152,12 +186,48 @@ function parseXcmInstruction(value: unknown): XcmInstruction {
 }
 
 function parseLocationOrigin(value: string): ReturnType<typeof locationOrigin> {
-  const input = record(JSON.parse(value), "--origin location");
+  return locationOrigin(parseLocation(JSON.parse(value), "--origin location"));
+}
+
+async function readRegistry(path: string): Promise<TraceDeps["registry"]> {
+  return parseRegistry(JSON.parse(await readFile(path, "utf8")));
+}
+
+function parseRegistry(value: unknown): TraceDeps["registry"] {
+  const input = record(value, "registry file");
+  const chains = array(input["chains"], "registry chains");
+  return createStaticRegistry(chains.map(parseChainEndpoint));
+}
+
+function parseChainEndpoint(value: unknown): ChainEndpoint {
+  const input = record(value, "registry chain");
+  const rpc = input["rpc"];
+  if (typeof rpc !== "string" || rpc.length === 0) {
+    throw new Error("Registry chain rpc must be a non-empty string.");
+  }
+  return {
+    rpc,
+    location: parseLocation(input["location"], "registry chain location"),
+    ...(typeof input["name"] === "string" ? { name: input["name"] } : {}),
+  };
+}
+
+function parseLocation(value: unknown, label: string): Location {
+  const input = record(value, label);
   const parents = input["parents"];
   if (typeof parents !== "number" || !Number.isInteger(parents) || parents < 0) {
-    throw new Error("--origin JSON location parents must be a non-negative integer.");
+    throw new Error(`${label} parents must be a non-negative integer.`);
   }
-  return locationOrigin(location(parents, normalized(input["interior"] ?? "Here", "location interior")));
+  return location(parents, normalized(input["interior"] ?? "Here", "location interior"));
+}
+
+function parseMaxDepth(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error("--max-depth must be a positive integer.");
+  }
+  return parsed;
 }
 
 function parseXcmVersion(value: unknown): XcmVersion {

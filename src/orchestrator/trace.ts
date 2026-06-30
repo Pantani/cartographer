@@ -5,7 +5,7 @@
 import type { ChainClient } from "../client/index.js";
 import { openChainClient } from "../client/index.js";
 import { diagnoseWithSeedRules } from "../diagnostics/index.js";
-import type { RouteRegistry } from "../registry/index.js";
+import { locationKey, type RouteRegistry } from "../registry/index.js";
 import type {
   ChainRef,
   DryRunEffects,
@@ -29,7 +29,7 @@ import {
 export type ClientFactory = (rpc: string) => ChainClient;
 
 export interface TraceDeps {
-  readonly openClient: ClientFactory;
+  readonly openClient?: ClientFactory;
   readonly registry?: RouteRegistry;
   readonly maxDepth?: number;
 }
@@ -47,6 +47,11 @@ interface ExecutedHop {
   readonly forwarded: readonly PendingXcm[];
 }
 
+interface FollowState {
+  readonly maxDepth: number;
+  readonly visited: Set<string>;
+}
+
 /**
  * Run the origin dry-run, optionally follow forwarded XCMs through a registry, and assemble a trace.
  * Always disconnects clients. Errors propagate — no silent fallback.
@@ -55,7 +60,8 @@ export async function trace(
   request: TraceRequest,
   deps: TraceDeps = defaultDeps,
 ): Promise<TraceResult> {
-  const first = await runInitialHop(request, deps.openClient);
+  const openClient = deps.openClient ?? openChainClient;
+  const first = await runInitialHop(request, openClient);
   if (deps.registry === undefined || first.forwarded.length === 0) return singleHopTrace(first.hop);
 
   const hops = [first.hop];
@@ -107,14 +113,15 @@ async function followForwarded(
   pending: PendingXcm[],
   deps: TraceDeps,
 ): Promise<void> {
-  const maxDepth = deps.maxDepth ?? DEFAULT_MAX_DEPTH;
+  const state = { maxDepth: deps.maxDepth ?? DEFAULT_MAX_DEPTH, visited: new Set<string>() };
   while (pending.length > 0) {
-    if (hops.length >= maxDepth) throw new Error(`Trace exceeded maxDepth=${String(maxDepth)}.`);
+    if (hops.length >= state.maxDepth) throw new Error(`Trace exceeded maxDepth=${String(state.maxDepth)}.`);
     const next = pending.shift();
     if (next !== undefined) {
+      markVisited(next, state);
       const executed = await runForwardedHop(next, hops.length, deps);
       hops.push(executed.hop);
-      pending.push(...executed.forwarded);
+      if (shouldFollowDescendants(executed.hop)) pending.push(...executed.forwarded);
     }
   }
 }
@@ -127,7 +134,7 @@ async function runForwardedHop(
 ): Promise<ExecutedHop> {
   const endpoint = deps.registry?.resolve(pending.destination);
   if (endpoint === undefined) throw unresolvedDestination(pending.destination);
-  const client = deps.openClient(endpoint.rpc);
+  const client = (deps.openClient ?? openChainClient)(endpoint.rpc);
   try {
     const effects = await client.dryRunXcm(locationOrigin(pending.destination), pending.xcm);
     const fees = await estimateFeesForEffects(client, effects);
@@ -167,6 +174,26 @@ function queuedForwarded(effects: DryRunEffects): readonly PendingXcm[] {
   );
 }
 
+/** Follow descendants only from successful hops; failures are terminal for their branch. */
+function shouldFollowDescendants(h: Hop): boolean {
+  return h.diagnosis.status === "success";
+}
+
+/** Record a forwarded edge and fail before replaying an already-seen destination/message. */
+function markVisited(pending: PendingXcm, state: FollowState): void {
+  const key = pendingKey(pending);
+  if (state.visited.has(key)) throw cycleDetected(pending.destination);
+  state.visited.add(key);
+}
+
+/** Deterministic key for cycle detection; bigint values are retained as decimal strings. */
+function pendingKey(pending: PendingXcm): string {
+  return JSON.stringify(
+    { destination: locationKey(pending.destination), xcm: pending.xcm },
+    (_key, value: unknown) => (typeof value === "bigint" ? { $bigint: value.toString(10) } : value),
+  );
+}
+
 /** Pick the first failing hop, otherwise the last successful hop. Pure. */
 function headlineDiagnosis(hops: readonly Hop[]): Hop["diagnosis"] {
   return (
@@ -181,5 +208,10 @@ function headlineDiagnosis(hops: readonly Hop[]): Hop["diagnosis"] {
 
 /** Build an unresolved-route error without silently dropping forwarded messages. */
 function unresolvedDestination(destination: Location): Error {
-  return new Error(`Unresolved forwarded XCM destination: ${JSON.stringify(destination)}`);
+  return new Error(`Unresolved forwarded XCM destination: ${locationKey(destination)}`);
+}
+
+/** Build a cycle error for a repeated forwarded destination/message. */
+function cycleDetected(destination: Location): Error {
+  return new Error(`Forwarded XCM cycle detected at destination: ${locationKey(destination)}`);
 }

@@ -1,9 +1,10 @@
 # Usage
 
-Cartographer's current Sprint-0 runnable surface supports single-hop `--call`
-tracing and raw `--xcm` JSON tracing. Existing live handoff scripts still focus
-on `--call`; raw-XCM live proof needs dedicated env/file inputs before it can be
-claimed as product evidence.
+Cartographer's current runnable surface supports single-hop `--call` tracing,
+raw `--xcm` JSON tracing, and static-registry multi-hop tracing. The live
+handoff script can assemble `--call`, raw-XCM, and registry-backed CLI runs;
+they become product evidence only when the required env/file inputs point at a
+real route under test.
 
 ## Install And Build
 
@@ -29,8 +30,16 @@ Required for client-level live evidence:
 Required for the built CLI handoff (`pnpm run xcm:cli`):
 
 - `CARTOGRAPHER_IT_RPC`
+
+Call mode:
+
 - `CARTOGRAPHER_IT_ACCOUNT`
 - `CARTOGRAPHER_IT_CALL_OK` or `CARTOGRAPHER_IT_CALL`
+
+Raw-XCM mode, selected when `CARTOGRAPHER_IT_XCM_FILE` is set:
+
+- `CARTOGRAPHER_IT_XCM_ORIGIN`
+- `CARTOGRAPHER_IT_XCM_FILE`
 
 Required for the full live suite (`pnpm run test:live`):
 
@@ -51,6 +60,8 @@ Optional:
 
 - `CARTOGRAPHER_IT_RESULT_XCM_VERSION` (`2`, `3`, `4`, or `5`; defaults to `4`)
 - `CARTOGRAPHER_IT_FORMAT` (`human` or `json`; defaults to `json` for `xcm:cli`)
+- `CARTOGRAPHER_IT_REGISTRY` (static registry JSON path passed as `--registry`)
+- `CARTOGRAPHER_IT_MAX_DEPTH` (positive integer passed as `--max-depth`)
 
 ## Run A Trace
 
@@ -74,6 +85,13 @@ node dist/cli/index.js trace \
   --call '0x...' \
   --format json
 ```
+
+JSON output preserves the full `TraceResult` payload and adds two top-level route
+helpers:
+
+- `route`: ordered hop summaries with index, display label, chain reference, and
+  status.
+- `failingHop`: the first failing hop summary, or `null` when no hop failed.
 
 Raw XCM JSON input is available with `--xcm`. For this path, `--origin` must be
 a JSON XCM `Location`, not an account:
@@ -99,6 +117,41 @@ node dist/cli/index.js trace \
 The raw JSON shape is Cartographer's domain model: `version` is `2`, `3`, `4`,
 or `5`; `instructions` is an array of `{ "kind": string, "args"?: JSON }`.
 
+## Run A Multi-Hop Trace
+
+Multi-hop tracing follows `forwardedXcms` only when a static registry is
+provided. The registry maps normalized XCM destination locations to endpoints:
+
+```bash
+cat > registry.json <<'JSON'
+{
+  "chains": [
+    {
+      "name": "Asset Hub",
+      "rpc": "wss://asset-hub-polkadot-rpc.example",
+      "location": { "parents": 1, "interior": { "X1": { "Parachain": 1000 } } }
+    }
+  ]
+}
+JSON
+```
+
+Then pass it to the trace command:
+
+```bash
+node dist/cli/index.js trace \
+  --rpc wss://relay.example \
+  --origin 5... \
+  --call '0x...' \
+  --registry ./registry.json \
+  --max-depth 4 \
+  --format human
+```
+
+`--max-depth` is the maximum total hop count, including the origin hop. If the
+route repeats an already-seen forwarded destination/message, Cartographer fails
+with a cycle error instead of re-running the same route edge.
+
 ## Test And Coverage Commands
 
 Unit tests never hit the network:
@@ -107,8 +160,8 @@ Unit tests never hit the network:
 pnpm test
 ```
 
-Coverage runs the same non-live test set and enforces a global 70% floor for
-statements, branches, functions, and lines:
+Coverage runs the same non-live test set over `src/` and non-test `scripts/`,
+then enforces a global 70% floor for statements, branches, functions, and lines:
 
 ```bash
 pnpm coverage
@@ -154,6 +207,7 @@ The repository exposes Make targets for local terminal use and equivalent
 | Run client-level live dry-run evidence | `make xcm-test` | `pnpm run xcm:test` |
 | Run the built CLI with live env vars | `make xcm-cli` | `pnpm run xcm:cli` |
 | Run every live integration test with required env vars | `make test-live` | `pnpm run test:live` |
+| Generate a diagnostics fixture module from scrubbed evidence | `make evidence-fixture INPUT=path` | `pnpm --silent run evidence:fixture -- path` |
 | Run ESLint auto-fix | `make lint-fix` | `pnpm lint:fix` |
 
 Prepare local test infrastructure:
@@ -202,9 +256,11 @@ pnpm run test:live
 ```
 
 These live commands are read-only dry-runs. They do not broadcast an extrinsic.
-The current live handoff commands exercise SCALE-encoded `--call` input; they do
-not yet provide dedicated raw `--xcm` JSON env/file inputs. Do not treat passing
-`xcm:*` scripts as raw-XCM live proof until that contract exists.
+The `xcm:cli` handoff supports SCALE-encoded `--call` input by default and raw
+`--xcm` input when `CARTOGRAPHER_IT_XCM_FILE` is set. It also passes
+`CARTOGRAPHER_IT_REGISTRY` and `CARTOGRAPHER_IT_MAX_DEPTH` through to the CLI
+when configured. Treat it as raw-XCM or multi-hop proof only when those inputs
+are real files/env values for the route under test.
 
 `pnpm test:it` and `pnpm test:debug-flow` are permissive by design and skip live
 cases when env vars are missing. `pnpm run xcm:test`, `pnpm run xcm:cli`, and
@@ -246,6 +302,23 @@ CARTOGRAPHER_IT_CALL_OK='0x...' \
 pnpm exec vitest run src/cli/trace.it.test.ts
 ```
 
+Raw-XCM CLI handoff:
+
+```bash
+CARTOGRAPHER_IT_RPC='wss://asset-hub-polkadot-rpc.example' \
+CARTOGRAPHER_IT_XCM_ORIGIN='{"parents":1,"interior":"Here"}' \
+CARTOGRAPHER_IT_XCM_FILE='./program.json' \
+pnpm run xcm:cli
+```
+
+Raw-XCM or call handoff with a static multi-hop registry:
+
+```bash
+CARTOGRAPHER_IT_REGISTRY='./registry.json' \
+CARTOGRAPHER_IT_MAX_DEPTH='4' \
+pnpm run xcm:cli
+```
+
 Full debug-flow proof:
 
 ```bash
@@ -280,6 +353,35 @@ pnpm test:it
 - The client evidence test prints `CARTOGRAPHER_IT_EVIDENCE` JSON. Use that
   output to close payload-shape `TODO(verify:)` items only after checking that
   the endpoint, call, and runtime target are the intended ones.
+- For the field-level capture checklist, see
+  [`docs/prompts/0002-live-corpus-capture.md`](./prompts/0002-live-corpus-capture.md).
+
+## Promoting Scrubbed Evidence
+
+After capturing live evidence, scrub endpoint, account, and call values before
+promotion. The fixture helper reads mixed command logs and extracts
+`CARTOGRAPHER_IT_EVIDENCE` blocks:
+
+```bash
+pnpm --silent run evidence:fixture -- \
+  _workspace/live-corpus/example.scrubbed.log \
+  > src/diagnostics/__fixtures__/live-evidence.generated.ts
+```
+
+It also reads from stdin when no log path is provided:
+
+```bash
+pnpm --silent run evidence:fixture < _workspace/live-corpus/example.scrubbed.log \
+  > src/diagnostics/__fixtures__/live-evidence.generated.ts
+```
+
+The same helper is available through `make evidence-fixture INPUT=<log-path>`
+when using the local Make shortcuts, or through `make evidence-fixture < <log>`
+for stdin-based promotion.
+
+Review the generated fixture before committing. It preserves the captured
+`normalizedEffects` payload and does not treat unreviewed raw payloads as source
+truth.
 
 ## Continuous Integration
 
@@ -287,7 +389,8 @@ The CI workflow runs on pull requests, pushes to `main`, and manual dispatch.
 
 - `quality`: Node 20.x and 22.x matrix for lint/complexity, typecheck, unit
   tests, dependency boundaries, and build.
-- `coverage`: global 70% floor for statements, branches, functions, and lines.
+- `coverage`: global 70% floor for statements, branches, functions, and lines
+  over `src/` and non-test `scripts/`.
 - `workflow-lint`: `actionlint` over `.github/workflows/*.yml`.
 - `ci-success`: required rollup that fails if any required CI job failed.
 

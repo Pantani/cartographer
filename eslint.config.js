@@ -29,6 +29,18 @@ export default tseslint.config(
     },
   },
   {
+    files: ["scripts/**/*.mjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+      },
+    },
+    rules: {
+      "@typescript-eslint/explicit-module-boundary-types": "off",
+    },
+  },
+  {
     // Tests may be looser on return-type annotations.
     files: ["**/*.test.ts"],
     rules: {

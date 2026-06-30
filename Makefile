@@ -1,4 +1,4 @@
-.PHONY: help infra-up check xcm-test xcm-cli test-live lint-fix
+.PHONY: help infra-up check xcm-test xcm-cli test-live evidence-fixture lint-fix
 
 help:
 	@printf '%s\n' \
@@ -8,6 +8,7 @@ help:
 		'  make xcm-test   Run live DryRunApi/XcmPaymentApi evidence test' \
 		'  make xcm-cli    Run the built trace CLI with live env vars' \
 		'  make test-live  Run all live integration tests with required env vars' \
+		'  make evidence-fixture INPUT=path  Generate fixture module from scrubbed evidence' \
 		'  make lint-fix   Run ESLint auto-fix'
 
 infra-up:
@@ -25,6 +26,9 @@ xcm-cli:
 
 test-live:
 	pnpm run test:live
+
+evidence-fixture:
+	@pnpm --silent run evidence:fixture -- $(INPUT)
 
 lint-fix:
 	pnpm lint:fix

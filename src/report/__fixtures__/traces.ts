@@ -15,6 +15,7 @@ import {
   normalizedEvent,
   singleHopTrace,
   successDiagnosis,
+  traceResult,
   unknownDiagnosis,
   weight,
   type TraceResult,
@@ -116,3 +117,40 @@ export const forwardedTrace: TraceResult = singleHopTrace(
     }),
   }),
 );
+
+/** MULTI-HOP FAILURE: a route where the second hop is the decisive failure. */
+export const multiHopFailureTrace: TraceResult = traceResult({
+  hops: [
+    hop({
+      index: 0,
+      chain: chainRef({ name: "Relay Chain", rpc: "wss://relay.example" }),
+      effects: dryRunEffects({
+        executionResult: executionSuccess(),
+        xcmVersion: 4,
+        forwardedXcms: [forwardedXcm(location(1, { X1: { Parachain: 1000 } }), [xcmProgram(4)])],
+      }),
+      diagnosis: successDiagnosis(),
+    }),
+    hop({
+      index: 1,
+      chain: chainRef({
+        name: "Asset Hub",
+        rpc: "wss://asset-hub.example",
+        location: location(1, { X1: { Parachain: 1000 } }),
+      }),
+      effects: dryRunEffects({
+        executionResult: executionFailure(executionError("Barrier", { detail: "origin denied" })),
+        xcmVersion: 4,
+        events: [normalizedEvent("PolkadotXcm", "Attempted", { outcome: "Error" })],
+      }),
+      diagnosis: failureDiagnosis({
+        ruleId: "barrier-blocked",
+        rootCause: "The destination's entry barrier rejected the message.",
+      }),
+    }),
+  ],
+  diagnosis: failureDiagnosis({
+    ruleId: "barrier-blocked",
+    rootCause: "The destination's entry barrier rejected the message.",
+  }),
+});

@@ -14,13 +14,15 @@ failure — in human language. No Chopsticks, no hop chaining.
   normalizing PAPI output into `types/` domain models.
 - M0.3 `diagnostics/`: rule engine + the seed rule set (ADR-0003), with fixtures.
 - M0.4 `report/`: human and JSON renderers for a single-hop `TraceResult`.
-- M0.5 `cli/`: `cartographer trace --rpc --origin --call --format`; keep
-  `--xcm` rejected until `dryRunXcm` and raw XCM input validation are verified.
-- M0.6 Integration test against a live API-capable system chain (opt-in),
-  covering `--call` only until raw XCM support is built. Env contract:
-  client-only smoke uses `CARTOGRAPHER_IT_RPC`, `CARTOGRAPHER_IT_ACCOUNT`,
-  `CARTOGRAPHER_IT_CALL`; full trace uses those first two plus
-  `CARTOGRAPHER_IT_CALL_OK` and `CARTOGRAPHER_IT_CALL_FAIL`.
+- M0.5 `cli/`: `cartographer trace --rpc --origin --call --format`, raw
+  `--xcm` JSON input, static `--registry`, and `--max-depth` are implemented in
+  the non-live surface. Raw-XCM decoded payload shapes still need live capture
+  before the remaining `TODO(verify:)` notes can be removed.
+- M0.6 Integration test against a live API-capable system chain (opt-in). Call
+  mode uses `CARTOGRAPHER_IT_RPC`, `CARTOGRAPHER_IT_ACCOUNT`,
+  `CARTOGRAPHER_IT_CALL`, `CARTOGRAPHER_IT_CALL_OK`, and
+  `CARTOGRAPHER_IT_CALL_FAIL`; raw-XCM CLI handoff uses
+  `CARTOGRAPHER_IT_XCM_ORIGIN` and `CARTOGRAPHER_IT_XCM_FILE`.
 
 Exit criteria: a real failing reserve transfer produces a correct, human root
 cause and a fee estimate, end to end.
@@ -30,10 +32,13 @@ cause and a fee estimate, end to end.
 Goal: follow `forwarded_xcms` across hops automatically; produce an end-to-end
 trace tree with a per-hop diagnosis.
 
-- M1.1 `registry/`: `Location` → endpoint resolution + metadata cache.
-- M1.2 `orchestrator/` hop loop (queue, `maxDepth`, cycle guard).
-- M1.3 `report/`: render the hop tree (route view).
-- M1.4 Fixtures for a known 2–3 hop route (relay → Asset Hub → parachain).
+- M1.1 `registry/`: static `Location` → endpoint resolution and metadata cache
+  primitive are implemented.
+- M1.2 `orchestrator/` hop loop (queue, `maxDepth`, cycle guard) is covered by
+  fake-client tests.
+- M1.3 `report/`: route view is rendered in human and JSON output.
+- M1.4 Fixtures: representative synthetic 2–3 hop routes exist for non-live
+  regression coverage. A known live 2–3 hop corpus remains pending.
 
 Exit criteria: a multi-hop transfer is traced to its terminal hop, with the
 failing hop and cause identified when it breaks.
@@ -96,9 +101,10 @@ Honor `CLAUDE.md` (CC ≤ 10, pure modules, layering, sources verified).
 ### S0-T6 — Orchestrator + CLI
 > Wire `src/orchestrator/trace()` (single hop: dryRunCall → estimateFees →
 > diagnose → assemble `TraceResult`) and `src/cli/` (`cartographer trace` with
-> `--rpc --origin --call --format`, plus an explicit guarded rejection for
-> `--xcm` until `dryRunXcm` is verified). Integration test the happy path and a
-> known failing `--call` path against a live API-capable chain.
+> `--rpc --origin --call --format`). Raw `--xcm` support is now implemented
+> after source verification, with live payload-shape capture still pending.
+> Integration test the happy path and a known failing `--call` path against a
+> live API-capable chain.
 
 > After Sprint 0, capture 5–10 real dry-run outputs (success + each failure mode)
 > and commit them as the diagnostics regression corpus before starting V2.

@@ -12,9 +12,21 @@ function chainLabel(chain: ChainRef): string {
   return chain.name ?? chain.rpc ?? "unknown chain";
 }
 
-/** Header line locating the (single) hop. */
+/** Header line locating one hop. */
 function hopHeader(h: Hop): string {
   return `Hop ${h.index.toString(10)} @ ${chainLabel(h.chain)}`;
+}
+
+/** Ordered route summary for multi-hop traces. */
+function routeSummaryLines(result: TraceResult): readonly string[] {
+  if (result.hops.length < 2) return [];
+  return [`Route: ${result.hops.map((h) => chainLabel(h.chain)).join(" -> ")}`, ...failingHopLines(result)];
+}
+
+/** Failing-hop summary for multi-hop traces. */
+function failingHopLines(result: TraceResult): readonly string[] {
+  const failing = result.hops.find((h) => h.diagnosis.status === "failure");
+  return failing !== undefined ? [`Failing hop: ${hopHeader(failing)}`] : [];
 }
 
 /** Lines for one hop: header, diagnosis, fees, and (when unknown) raw effects. */
@@ -49,6 +61,7 @@ export function renderHuman(result: TraceResult): string {
   const lines = [
     "Cartographer trace",
     "==================",
+    ...routeSummaryLines(result),
     ...hopLines,
     ...traceFeeLines(result),
   ];

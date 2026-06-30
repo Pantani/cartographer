@@ -13,6 +13,7 @@ vi.mock("../report/index.js", () => ({ render: pipeline.render }));
 
 import { buildProgram, runCli } from "./command.js";
 import type { TraceRequest, TraceResult } from "../types/index.js";
+import type { TraceDeps } from "../orchestrator/index.js";
 
 const tmpDirs: string[] = [];
 
@@ -92,6 +93,49 @@ describe("cartographer trace — request building", () => {
 
     expect(captured?.format).toBe("human");
   });
+
+  it("passes a static registry file and max depth to the trace runner", async () => {
+    const registry = await writeTempJson({
+      chains: [
+        {
+          name: "Asset Hub",
+          rpc: "wss://asset-hub.test",
+          location: { parents: 1, interior: { X1: { Parachain: 1000 } } },
+        },
+      ],
+    });
+    let captured: [TraceRequest, TraceDeps?] | undefined;
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+
+    await run(
+      [
+        "trace",
+        "--rpc",
+        "wss://relay.test",
+        "--origin",
+        "//Alice",
+        "--call",
+        "0x0100",
+        "--registry",
+        registry,
+        "--max-depth",
+        "3",
+      ],
+      (...args) => {
+        captured = args;
+        return Promise.resolve("ROUTE");
+      },
+    );
+
+    expect(captured?.[0].rpc).toBe("wss://relay.test");
+    expect(captured?.[1]?.maxDepth).toBe(3);
+    expect(captured?.[1]?.registry?.resolve({ parents: 1, interior: { X1: { Parachain: 1000 } } })).toEqual({
+      name: "Asset Hub",
+      rpc: "wss://asset-hub.test",
+      location: { parents: 1, interior: { X1: { Parachain: 1000 } } },
+    });
+    expect(out).toHaveBeenCalledWith("ROUTE\n");
+  });
 });
 
 describe("cartographer trace — CLI runner", () => {
@@ -166,6 +210,30 @@ describe("cartographer trace — validation", () => {
     ).rejects.toThrow(/instruction kind/i);
   });
 
+  it("rejects raw-XCM input with an unsupported version", async () => {
+    const file = await writeTempJson({ version: 1, instructions: [] });
+
+    await expect(
+      run(["trace", "--rpc", "wss://x", "--origin", "{\"parents\":1,\"interior\":\"Here\"}", "--xcm", file], noop),
+    ).rejects.toThrow(/version/i);
+  });
+
+  it("rejects raw-XCM input whose instructions are not an array", async () => {
+    const file = await writeTempJson({ version: 4, instructions: {} });
+
+    await expect(
+      run(["trace", "--rpc", "wss://x", "--origin", "{\"parents\":1,\"interior\":\"Here\"}", "--xcm", file], noop),
+    ).rejects.toThrow(/instructions.*array/i);
+  });
+
+  it("rejects raw-XCM location origins with invalid parents", async () => {
+    const file = await writeTempJson({ version: 4, instructions: [] });
+
+    await expect(
+      run(["trace", "--rpc", "wss://x", "--origin", "{\"parents\":-1,\"interior\":\"Here\"}", "--xcm", file], noop),
+    ).rejects.toThrow(/parents.*non-negative integer/i);
+  });
+
   it("rejects a non-hex --call", async () => {
     await expect(
       run(["trace", "--rpc", "wss://x", "--origin", "//Alice", "--call", "deadbeef"], noop),
@@ -188,6 +256,30 @@ describe("cartographer trace — validation", () => {
     await expect(
       run(["trace", "--rpc", "wss://x", "--origin", "//Alice", "--call", "0x01", "--format", "yaml"], noop),
     ).rejects.toThrow(/Unknown --format/);
+  });
+
+  it("rejects invalid --max-depth values", async () => {
+    await expect(
+      run(["trace", "--rpc", "wss://x", "--origin", "//Alice", "--call", "0x01", "--max-depth", "0"], noop),
+    ).rejects.toThrow(/--max-depth/);
+  });
+
+  it("rejects malformed registry files", async () => {
+    const registry = await writeTempJson({ chains: [{ name: "Asset Hub", rpc: "wss://asset-hub.test" }] });
+
+    await expect(
+      run(["trace", "--rpc", "wss://x", "--origin", "//Alice", "--call", "0x01", "--registry", registry], noop),
+    ).rejects.toThrow(/registry chain location/i);
+  });
+
+  it("rejects registry entries with empty RPC endpoints", async () => {
+    const registry = await writeTempJson({
+      chains: [{ name: "Asset Hub", rpc: "", location: { parents: 1, interior: "Here" } }],
+    });
+
+    await expect(
+      run(["trace", "--rpc", "wss://x", "--origin", "//Alice", "--call", "0x01", "--registry", registry], noop),
+    ).rejects.toThrow(/rpc.*non-empty string/i);
   });
 
   it("rejects malformed commander option bags defensively", async () => {

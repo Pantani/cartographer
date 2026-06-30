@@ -9,7 +9,7 @@ is the operational detail.
 
 ```
 src/
-├── cli/            # entrypoint, arg parsing, command wiring   (edge)
+├── cli/            # entrypoint, arg parsing, command wiring, static registry input
 ├── orchestrator/   # trace engine: drive dry-run, collect effects, (V2) chain hops
 ├── client/         # PAPI wrapper: DryRunApi + XcmPaymentApi over RPC   (only I/O)
 ├── diagnostics/    # effects → root cause; data-driven rule registry   (pure)
@@ -22,10 +22,11 @@ src/
 
 ```
 cli ──▶ orchestrator ──▶ client ──▶ types
-                │  │
-                │  └──▶ diagnostics ──▶ types
-                └─────▶ report ──────▶ types
-                       registry ─────▶ types   (used by orchestrator in V2)
+ │             │  │
+ │             │  └──▶ diagnostics ──▶ types
+ │             └─────▶ registry ─────▶ types
+ ├──▶ report ───────────────────────▶ types
+ └──▶ registry   (static CLI registry input)
 ```
 
 Read "A ──▶ B" as "A may import B".
@@ -51,12 +52,13 @@ breakage (rule 6), and clean layering (rules 3, 4).
 
 The local all-up gate is `pnpm run check` or `make check`. It runs:
 
-1. `pnpm lint` — type-aware ESLint, cyclomatic complexity <= 10, cognitive
-   complexity <= 10, max nesting depth <= 4, and no explicit `any`.
+1. `pnpm lint` — ESLint over `src/` and `scripts/`; TypeScript sources use
+   type-aware rules. Cyclomatic complexity <= 10, cognitive complexity <= 10,
+   max nesting depth <= 4, and no explicit `any`.
 2. `pnpm typecheck` — `tsc --noEmit` against `tsconfig.json`.
 3. `pnpm test` — non-live unit tests only.
-4. `pnpm coverage` — non-live coverage with a global 70% floor for statements,
-   branches, functions, and lines.
+4. `pnpm coverage` — non-live coverage over `src/` and `scripts/` with a global
+   70% floor for statements, branches, functions, and lines.
 5. `pnpm depcheck` — dependency-cruiser layering and cycle checks.
 6. `pnpm build` — production TypeScript build.
 
@@ -77,13 +79,15 @@ flow.
 
 ## V2 note (multi-hop)
 
-In V2, `orchestrator/` gains a hop loop: maintain a queue of
-`(location, xcm)` from each hop's `forwarded_xcms`, resolve each `location` to an
-endpoint via `registry/`, `client.dryRunXcm(location, xcm)` there, enqueue new
-forwards, terminate on empty queue or `maxDepth`. The result is a hop tree, each
-node carrying its own `Diagnosis`. This is additive: the `TraceResult` is already
-hop-list-shaped (ADR-0001), so no restructuring of `diagnostics`/`report` is
-required — they iterate hops.
+In V2, `orchestrator/` maintains a hop queue of `(location, xcm)` from each
+hop's `forwarded_xcms`, resolves each `location` to an endpoint via `registry/`,
+calls `client.dryRunXcm(location, xcm)` there, enqueues new forwards, and
+terminates on an empty queue, `maxDepth`, unresolved destination, or repeated
+destination/message cycle. The CLI may instantiate a static registry from JSON
+and pass it as a trace dependency; endpoint probing and network I/O remain in
+`client/`. The result is hop-list-shaped, each hop carrying its own `Diagnosis`.
+This is additive: the `TraceResult` is already hop-list-shaped (ADR-0001), so no
+restructuring of `diagnostics`/`report` is required — they iterate hops.
 
 Performance guard: cache chain metadata per endpoint in `registry/` so the hop
 loop never refetches it (avoid N+1 metadata round-trips).

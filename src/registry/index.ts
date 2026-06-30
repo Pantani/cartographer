@@ -16,7 +16,12 @@ export interface RouteRegistry {
 
 /** Build a deterministic key for normalized Location values. */
 export function locationKey(loc: Location): string {
-  return JSON.stringify(loc);
+  return JSON.stringify(loc, keyReplacer);
+}
+
+/** JSON key replacer that keeps bigint values deterministic and non-lossy. */
+function keyReplacer(_key: string, value: unknown): unknown {
+  return typeof value === "bigint" ? { $bigint: value.toString(10) } : value;
 }
 
 /** Create an in-memory registry backed by structural Location equality. */

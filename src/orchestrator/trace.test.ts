@@ -3,6 +3,7 @@ import type { ChainClient } from "../client/index.js";
 import { createStaticRegistry } from "../registry/index.js";
 import type { TraceDeps } from "./index.js";
 import { trace } from "./index.js";
+import { threeHopRouteFixture } from "./__fixtures__/routes.js";
 import type { DryRunEffects, TraceRequest } from "../types/index.js";
 import {
   accountOrigin,
@@ -135,6 +136,45 @@ describe("trace (guards)", () => {
 });
 
 describe("trace (multi-hop)", () => {
+  it("traces a representative three-hop relay to destination fixture", async () => {
+    const originClient = fakeClientWith({
+      dryRunCall: () => Promise.resolve(threeHopRouteFixture.originEffects),
+    });
+    const assetHubDryRun = vi.fn(() => Promise.resolve(threeHopRouteFixture.assetHubEffects));
+    const assetHubClient = fakeClientWith({ dryRunXcm: assetHubDryRun });
+    const destinationDryRun = vi.fn(() => Promise.resolve(threeHopRouteFixture.destinationEffects));
+    const destinationClient = fakeClientWith({ dryRunXcm: destinationDryRun });
+    const openClient = vi.fn((rpc: string) => {
+      if (rpc === "wss://relay.test") return originClient.client;
+      if (rpc === "wss://asset-hub.test") return assetHubClient.client;
+      return destinationClient.client;
+    });
+
+    const result = await trace(
+      { ...request(), rpc: "wss://relay.test" },
+      {
+        openClient,
+        registry: threeHopRouteFixture.registry,
+        maxDepth: 3,
+      },
+    );
+
+    expect(result.hops.map((h) => h.chain.name ?? h.chain.rpc)).toEqual([
+      "wss://relay.test",
+      "Asset Hub",
+      "Destination Para",
+    ]);
+    expect(result.diagnosis.status).toBe("success");
+    expect(assetHubDryRun).toHaveBeenCalledWith(
+      locationOrigin(threeHopRouteFixture.assetHubLocation),
+      threeHopRouteFixture.toAssetHub,
+    );
+    expect(destinationDryRun).toHaveBeenCalledWith(
+      locationOrigin(threeHopRouteFixture.destinationLocation),
+      threeHopRouteFixture.toDestination,
+    );
+  });
+
   it("follows forwarded XCM through a resolved destination endpoint", async () => {
     const destination = location(1, { X1: { Parachain: 1000 } });
     const message = xcmProgram(4, [xcmInstruction("ClearOrigin")]);
@@ -173,7 +213,7 @@ describe("trace (multi-hop)", () => {
   });
 
   it("fails rather than silently dropping unresolved forwarded XCM when a registry is configured", async () => {
-    const destination = location(1, { X1: { Parachain: 2000 } });
+    const destination = location(1, { X1: { Parachain: 2000n } });
     const effects = dryRunEffects({
       executionResult: executionSuccess(),
       xcmVersion: 4,
@@ -184,6 +224,107 @@ describe("trace (multi-hop)", () => {
     await expect(
       trace(request(), { openClient: () => client, registry: createStaticRegistry([]) }),
     ).rejects.toThrow(/unresolved/i);
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+
+  it("fails on a repeated forwarded XCM cycle before re-running the same route edge", async () => {
+    const destination = location(1, { X1: { Parachain: 1000 } });
+    const message = xcmProgram(4, [xcmInstruction("ClearOrigin", { repeat: 1n })]);
+    const firstEffects = dryRunEffects({
+      executionResult: executionSuccess(),
+      xcmVersion: 4,
+      forwardedXcms: [forwardedXcm(destination, [message])],
+    });
+    const cyclicEffects = dryRunEffects({
+      executionResult: executionSuccess(),
+      xcmVersion: 4,
+      forwardedXcms: [forwardedXcm(destination, [message])],
+    });
+    const originClient = fakeClientWith({ dryRunCall: () => Promise.resolve(firstEffects) });
+    const destinationDryRun = vi.fn(() => Promise.resolve(cyclicEffects));
+    const destinationClient = fakeClientWith({ dryRunXcm: destinationDryRun });
+    const openClient = vi.fn((rpc: string) =>
+      rpc === "wss://origin.test" ? originClient.client : destinationClient.client,
+    );
+
+    await expect(
+      trace(
+        { ...request(), rpc: "wss://origin.test" },
+        {
+          openClient,
+          registry: createStaticRegistry([
+            { location: destination, rpc: "wss://asset-hub.test", name: "Asset Hub" },
+          ]),
+        },
+      ),
+    ).rejects.toThrow(/cycle/i);
+
+    expect(destinationDryRun).toHaveBeenCalledOnce();
+    expect(originClient.disconnect).toHaveBeenCalledOnce();
+    expect(destinationClient.disconnect).toHaveBeenCalledOnce();
+  });
+
+  it("does not follow descendants from a failing forwarded hop", async () => {
+    const assetHub = location(1, { X1: { Parachain: 1000 } });
+    const parachain = location(1, { X1: { Parachain: 2000 } });
+    const firstMessage = xcmProgram(4, [xcmInstruction("ClearOrigin")]);
+    const descendantMessage = xcmProgram(4, [xcmInstruction("DepositAsset")]);
+    const firstEffects = dryRunEffects({
+      executionResult: executionSuccess(),
+      xcmVersion: 4,
+      forwardedXcms: [forwardedXcm(assetHub, [firstMessage])],
+    });
+    const failingEffects = dryRunEffects({
+      executionResult: executionFailure(executionError("Barrier", { detail: "denied" })),
+      xcmVersion: 4,
+      forwardedXcms: [forwardedXcm(parachain, [descendantMessage])],
+    });
+    const originClient = fakeClientWith({ dryRunCall: () => Promise.resolve(firstEffects) });
+    const assetHubDryRun = vi.fn(() => Promise.resolve(failingEffects));
+    const assetHubClient = fakeClientWith({ dryRunXcm: assetHubDryRun });
+    const parachainDryRun = vi.fn(() => Promise.resolve(dryRunEffects({ executionResult: executionSuccess(), xcmVersion: 4 })));
+    const parachainClient = fakeClientWith({ dryRunXcm: parachainDryRun });
+    const openClient = vi.fn((rpc: string) => {
+      if (rpc === "wss://origin.test") return originClient.client;
+      if (rpc === "wss://asset-hub.test") return assetHubClient.client;
+      return parachainClient.client;
+    });
+
+    const result = await trace(
+      { ...request(), rpc: "wss://origin.test" },
+      {
+        openClient,
+        registry: createStaticRegistry([
+          { location: assetHub, rpc: "wss://asset-hub.test", name: "Asset Hub" },
+          { location: parachain, rpc: "wss://para.test", name: "Parachain 2000" },
+        ]),
+      },
+    );
+
+    expect(result.hops).toHaveLength(2);
+    expect(result.diagnosis.status).toBe("failure");
+    expect(result.diagnosis.ruleId).toBe("barrier-blocked");
+    expect(assetHubDryRun).toHaveBeenCalledOnce();
+    expect(parachainDryRun).not.toHaveBeenCalled();
+    expect(parachainClient.disconnect).not.toHaveBeenCalled();
+  });
+
+  it("fails before following more hops than maxDepth allows", async () => {
+    const destination = location(1, { X1: { Parachain: 1000 } });
+    const effects = dryRunEffects({
+      executionResult: executionSuccess(),
+      xcmVersion: 4,
+      forwardedXcms: [forwardedXcm(destination, [xcmProgram(4)])],
+    });
+    const { client, disconnect } = fakeClientWith({ dryRunCall: () => Promise.resolve(effects) });
+
+    await expect(
+      trace(request(), {
+        openClient: () => client,
+        registry: createStaticRegistry([{ location: destination, rpc: "wss://asset-hub.test" }]),
+        maxDepth: 1,
+      }),
+    ).rejects.toThrow(/maxDepth=1/);
     expect(disconnect).toHaveBeenCalledOnce();
   });
 });
